@@ -12,20 +12,20 @@ use super::mount::FileSystem;
 /// An in-memory node (file or directory).
 struct RamNode {
     inode: Inode,
-    data: Vec<u8>,            // file content (empty for dirs)
-    children: Vec<String>,    // child names (only for dirs)
+    data: Vec<u8>,
+    children: Vec<String>,
 }
 
 /// RAMFS — a fully in-memory filesystem.
 pub struct RamFs {
+    label: &'static str,
     nodes: Mutex<BTreeMap<String, RamNode>>,
     next_id: Mutex<u64>,
 }
 
 impl RamFs {
-    pub fn new() -> Self {
+    pub fn new(label: &'static str) -> Self {
         let mut nodes = BTreeMap::new();
-        // Create root directory "/"
         nodes.insert(String::from("/"), RamNode {
             inode: Inode { id: 0, file_type: FileType::Directory, size: 0 },
             data: Vec::new(),
@@ -33,6 +33,7 @@ impl RamFs {
         });
 
         RamFs {
+            label,
             nodes: Mutex::new(nodes),
             next_id: Mutex::new(1),
         }
@@ -45,7 +46,6 @@ impl RamFs {
         val
     }
 
-    /// Get the parent path and the basename of a path.
     fn parent_and_name(path: &str) -> (&str, &str) {
         let path = path.trim_end_matches('/');
         if path == "/" || path.is_empty() {
@@ -58,7 +58,6 @@ impl RamFs {
         }
     }
 
-    /// Normalize path: ensure it starts with / and has no trailing /
     fn normalize(path: &str) -> String {
         let p = if path.starts_with('/') { String::from(path) } else { alloc::format!("/{}", path) };
         if p.len() > 1 && p.ends_with('/') {
@@ -71,11 +70,12 @@ impl RamFs {
 
 impl FileSystem for RamFs {
     fn name(&self) -> &str {
-        "ramfs"
+        self.label
     }
 
     fn create(&self, path: &str) -> FsResult<Inode> {
         let path = Self::normalize(path);
+        crate::log_info!("[{}] create: {}", self.label, path);
         let mut nodes = self.nodes.lock();
 
         if nodes.contains_key(&path) {
@@ -85,7 +85,6 @@ impl FileSystem for RamFs {
         let (parent, name) = Self::parent_and_name(&path);
         let parent_str = String::from(parent);
 
-        // Check parent exists and is a directory
         let parent_node = nodes.get_mut(&parent_str).ok_or(FsError::NotFound)?;
         if parent_node.inode.file_type != FileType::Directory {
             return Err(FsError::NotADirectory);
@@ -105,6 +104,7 @@ impl FileSystem for RamFs {
 
     fn mkdir(&self, path: &str) -> FsResult<Inode> {
         let path = Self::normalize(path);
+        crate::log_info!("[{}] mkdir: {}", self.label, path);
         let mut nodes = self.nodes.lock();
 
         if nodes.contains_key(&path) {
@@ -141,6 +141,7 @@ impl FileSystem for RamFs {
 
     fn read(&self, path: &str, offset: usize, buf: &mut [u8]) -> FsResult<usize> {
         let path = Self::normalize(path);
+        crate::log_info!("[{}] read: {} (offset {})", self.label, path, offset);
         let nodes = self.nodes.lock();
         let node = nodes.get(&path).ok_or(FsError::NotFound)?;
 
@@ -160,6 +161,7 @@ impl FileSystem for RamFs {
 
     fn write(&self, path: &str, offset: usize, data: &[u8]) -> FsResult<usize> {
         let path = Self::normalize(path);
+        crate::log_info!("[{}] write: {} ({} bytes at offset {})", self.label, path, data.len(), offset);
         let mut nodes = self.nodes.lock();
         let node = nodes.get_mut(&path).ok_or(FsError::NotFound)?;
 
@@ -167,7 +169,6 @@ impl FileSystem for RamFs {
             return Err(FsError::IsADirectory);
         }
 
-        // Extend or overwrite
         let end = offset + data.len();
         if end > node.data.len() {
             node.data.resize(end, 0);
@@ -180,6 +181,7 @@ impl FileSystem for RamFs {
 
     fn readdir(&self, path: &str) -> FsResult<Vec<DirEntry>> {
         let path = Self::normalize(path);
+        crate::log_info!("[{}] readdir: {}", self.label, path);
         let nodes = self.nodes.lock();
         let node = nodes.get(&path).ok_or(FsError::NotFound)?;
 
@@ -207,22 +209,21 @@ impl FileSystem for RamFs {
 
     fn unlink(&self, path: &str) -> FsResult<()> {
         let path = Self::normalize(path);
+        crate::log_info!("[{}] unlink: {}", self.label, path);
         if path == "/" {
             return Err(FsError::InvalidPath);
         }
 
         let mut nodes = self.nodes.lock();
 
-        // Check if it's a non-empty directory
         if let Some(node) = nodes.get(&path) {
             if node.inode.file_type == FileType::Directory && !node.children.is_empty() {
-                return Err(FsError::IsADirectory); // directory not empty
+                return Err(FsError::IsADirectory);
             }
         } else {
             return Err(FsError::NotFound);
         }
 
-        // Remove from parent's children
         let (parent, name) = Self::parent_and_name(&path);
         let parent_str = String::from(parent);
         if let Some(parent_node) = nodes.get_mut(&parent_str) {
@@ -235,5 +236,6 @@ impl FileSystem for RamFs {
 }
 
 lazy_static! {
-    pub static ref RAMFS_INSTANCE: RamFs = RamFs::new();
+    pub static ref RAMFS_INSTANCE: RamFs = RamFs::new("ramfs");
+    pub static ref TMPFS_INSTANCE: RamFs = RamFs::new("tmpfs");
 }

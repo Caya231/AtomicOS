@@ -1,7 +1,6 @@
 use crate::println;
-use super::super::state;
 
-/// kill <pid> — terminate a simulated process.
+/// kill <pid> — terminate a task via the scheduler.
 pub fn run(args: &str) {
     let pid_str = args.trim();
     if pid_str.is_empty() {
@@ -9,7 +8,7 @@ pub fn run(args: &str) {
         return;
     }
 
-    let pid: u32 = match pid_str.parse() {
+    let pid: u64 = match pid_str.parse() {
         Ok(v) => v,
         Err(_) => { println!("kill: invalid pid: {}", pid_str); return; }
     };
@@ -19,12 +18,11 @@ pub fn run(args: &str) {
         return;
     }
 
-    let mut table = state::PROCS.lock();
-    if let Some(pos) = table.procs.iter().position(|p| p.pid == pid) {
-        let name = table.procs[pos].name.clone();
-        table.procs.remove(pos);
-        println!("Terminated process {} (pid {})", name, pid);
-        state::log_cmd(&alloc::format!("kill {}", pid));
+    // Remove task from scheduler ready queue
+    let mut sched = crate::scheduler::SCHEDULER.lock();
+    if let Some(pos) = sched.ready_queue.iter().position(|t| t.id.0 == pid) {
+        let task = sched.ready_queue.remove(pos).unwrap();
+        println!("Terminated task '{}' (pid {})", task.name, pid);
     } else {
         println!("kill: no such process: {}", pid);
     }

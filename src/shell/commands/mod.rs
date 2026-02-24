@@ -23,3 +23,5 @@ pub mod log;
 pub mod spawn;
 pub mod yield_cmd;
 pub mod touch;
+pub mod vfstest;
+pub mod write;

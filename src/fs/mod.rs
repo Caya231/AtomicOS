@@ -17,15 +17,19 @@ lazy_static! {
 /// Initialize the VFS and mount a RAMFS at root.
 pub fn init() {
     let mut vfs = VFS.lock();
-    // Mount the in-memory RAMFS at "/"
+    // Mount the primary RAMFS at "/"
     let ramfs: &'static ramfs::RamFs = &ramfs::RAMFS_INSTANCE;
     vfs.mount("/", ramfs);
+
+    // Mount a separate TmpFS at "/tmp"
+    let tmpfs: &'static ramfs::RamFs = &ramfs::TMPFS_INSTANCE;
+    vfs.mount("/tmp", tmpfs);
 
     // Seed with default files
     drop(vfs);
     seed_default_files();
 
-    crate::log_info!("VFS initialized with RAMFS mounted at /.");
+    crate::log_info!("VFS initialized: ramfs at /, tmpfs at /tmp.");
 }
 
 fn seed_default_files() {
