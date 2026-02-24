@@ -6,3 +6,4 @@ nohup.out
 *.iso
 *.bin
 *.o
+*.log
