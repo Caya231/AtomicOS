@@ -77,7 +77,9 @@ extern "x86-interrupt" fn page_fault_handler(
 extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    // Apenas silenciado para evitar flood no terminal, mas é trigado por padrão!
+    // Increment the global uptime tick counter
+    crate::shell::commands::uptime::tick();
+
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());

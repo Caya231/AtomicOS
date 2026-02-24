@@ -1,0 +1,11 @@
+pub mod echo;
+pub mod ls;
+pub mod cat;
+pub mod clear;
+pub mod help;
+pub mod date;
+pub mod whoami;
+pub mod pwd;
+pub mod uptime;
+pub mod version;
+pub mod neofetch;

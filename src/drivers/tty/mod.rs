@@ -12,37 +12,6 @@ pub fn print_prompt() {
     print!("root@atomicos:~$ ");
 }
 
-const NEOFETCH_ART: &str = r#"
-            .       
-           / \      
-          /   \     
-    .----' .+. '----.
-    |  _.-' | '-._  |
-    '-'  ___+___  '-'
-      .-'  (*)  '-.  
-   .-' .---/ \---. '-.
-  /  .-'   | |   '-. \
- | .'   .--+-+--.   '.| 
- |/  .-'   | |   '-. \|
-  '-'  '---+-+---'  '-'
-       '---/ \---'   
-          \ /       
-           '        
-"#;
-
-fn print_neofetch() {
-    println!("        AtomicOS x86_64");
-    println!("  ========================");
-    println!("{}", NEOFETCH_ART);
-    println!("  OS:       AtomicOS 0.1.0");
-    println!("  Arch:     x86_64");
-    println!("  Kernel:   Rust (no_std)");
-    println!("  Shell:    AtomicTTY v1");
-    println!("  Memory:   Heap (Bump Alloc)");
-    println!("  Drivers:  PS/2 KB + Mouse");
-    println!("  Display:  VGA Text 80x25");
-}
-
 pub fn process_input_loop() -> ! {
     let mut command_buffer = String::new();
 
@@ -60,14 +29,8 @@ pub fn process_input_loop() -> ! {
             }
             KeyCode::Enter => {
                 println!();
-                
-                match command_buffer.trim() {
-                    "neofetch" => print_neofetch(),
-                    "clear" => crate::vga::WRITER.lock().clear_screen(),
-                    "" => {},
-                    cmd => println!("Command not found: {}", cmd)
-                }
-
+                // Dispatch to shell command system
+                crate::shell::exec_command(&command_buffer);
                 command_buffer.clear();
                 print_prompt();
             },
@@ -77,19 +40,18 @@ pub fn process_input_loop() -> ! {
                     crate::vga::WRITER.lock().backspace();
                 }
             },
-            KeyCode::ArrowUp => print!("[Up]"),
-            KeyCode::ArrowDown => print!("[Down]"),
-            KeyCode::ArrowLeft => print!("[Left]"),
-            KeyCode::ArrowRight => print!("[Right]"),
-            KeyCode::F(num) => print!("[F{}]", num),
+            KeyCode::ArrowUp => {},
+            KeyCode::ArrowDown => {},
+            KeyCode::ArrowLeft => {},
+            KeyCode::ArrowRight => {},
+            KeyCode::F(_) => {},
             KeyCode::Unknown => {}
         }
 
-        // Tenta ler do mouse também de forma não-bloqueante
+        // Non-blocking mouse event check
         if let Some(mouse_event) = crate::drivers::mouse::try_read_event() {
-            // Se clicar com o esquerdo, avisa no log
             if mouse_event.left_button {
-                crate::log_info!("Mouse Left Click at X: {}, Y: {}", mouse_event.x_movement, mouse_event.y_movement);
+                crate::log_info!("Mouse Click at X:{}, Y:{}", mouse_event.x_movement, mouse_event.y_movement);
             }
         }
     }
