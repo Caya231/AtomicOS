@@ -16,7 +16,6 @@ const CMD_STATUS: u16      = 7; // R: status / W: command
 
 // Status register bits
 const STATUS_BSY: u8  = 0x80;
-const STATUS_DRDY: u8 = 0x40;
 const STATUS_DRQ: u8  = 0x08;
 const STATUS_ERR: u8  = 0x01;
 const STATUS_DF: u8   = 0x20;
@@ -108,6 +107,9 @@ impl AtaDevice {
     fn wait_bsy(&self) -> AtaResult<()> {
         for _ in 0..100_000 {
             let status = self.read_port(CMD_STATUS);
+            if status == 0xFF {
+                return Err(AtaError::DeviceNotFound); // floating bus
+            }
             if status & STATUS_BSY == 0 {
                 return Ok(());
             }
@@ -120,6 +122,9 @@ impl AtaDevice {
     fn wait_drq(&self) -> AtaResult<()> {
         for _ in 0..100_000 {
             let status = self.read_port(CMD_STATUS);
+            if status == 0xFF {
+                return Err(AtaError::DeviceNotFound);
+            }
             if status & STATUS_ERR != 0 || status & STATUS_DF != 0 {
                 return Err(AtaError::DeviceFault);
             }
@@ -149,11 +154,21 @@ impl AtaDevice {
 
     /// Identify the disk. Sets `detected` to true on success.
     pub fn identify(&mut self) -> AtaResult<()> {
+        // Check for floating bus first (no device at all)
+        let initial = self.read_port(CMD_STATUS);
+        if initial == 0xFF {
+            return Err(AtaError::DeviceNotFound);
+        }
+
         self.select_drive();
+
+        // Clear sector count / LBA for IDENTIFY
         self.write_port(SECTOR_COUNT, 0);
         self.write_port(LBA_LOW, 0);
         self.write_port(LBA_MID, 0);
         self.write_port(LBA_HIGH, 0);
+
+        // Send IDENTIFY command
         self.write_port(CMD_STATUS, CMD_IDENTIFY);
 
         // Read status — if 0, no device
@@ -165,11 +180,11 @@ impl AtaDevice {
         // Wait for BSY to clear
         self.wait_bsy()?;
 
-        // Check LBA mid/high — if non-zero, it's not ATA
+        // Check LBA mid/high — if non-zero, it's ATAPI, not ATA
         let mid = self.read_port(LBA_MID);
         let high = self.read_port(LBA_HIGH);
         if mid != 0 || high != 0 {
-            return Err(AtaError::DeviceNotFound); // Not ATA (possibly ATAPI)
+            return Err(AtaError::DeviceNotFound);
         }
 
         // Wait for DRQ or ERR

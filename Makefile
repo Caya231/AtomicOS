@@ -33,7 +33,7 @@ BOOT_OBJS := $(AS_OBJS) $(C_OBJS)
 # --- QEMU ---
 QEMU     := qemu-system-x86_64
 DISK_IMG  := build/disk.img
-QEMU_ARGS := -cdrom $(ISO_FILE) -drive format=raw,file=$(DISK_IMG),if=ide -serial stdio -m 128M
+QEMU_ARGS := -drive format=raw,file=$(DISK_IMG),if=ide,index=0 -cdrom $(ISO_FILE) -boot d -serial stdio -m 128M
 QEMU_DBG  := $(QEMU_ARGS) -s -S -d int -no-reboot -no-shutdown
 
 # ============================================================================
