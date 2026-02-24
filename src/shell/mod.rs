@@ -40,6 +40,7 @@ pub fn exec_command(input: &str) {
         "log"         => commands::log::run(args),
         "spawn"       => commands::spawn::run(args),
         "yield"       => commands::yield_cmd::run(args),
+        "touch"       => commands::touch::run(args),
         _             => println!("{}: command not found", cmd),
     }
 }

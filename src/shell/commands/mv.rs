@@ -1,8 +1,7 @@
 use crate::println;
-use alloc::string::String;
-use super::super::state;
+use alloc::vec;
 
-/// mv <src> <dst> — move/rename a file in the in-memory filesystem.
+/// mv <src> <dst> — move/rename a file via VFS (copy + delete).
 pub fn run(args: &str) {
     let parts: alloc::vec::Vec<&str> = args.trim().split_whitespace().collect();
     if parts.len() < 2 {
@@ -10,16 +9,28 @@ pub fn run(args: &str) {
         return;
     }
 
-    let src = if parts[0].starts_with('/') { String::from(parts[0]) } else { alloc::format!("/{}", parts[0]) };
-    let dst = if parts[1].starts_with('/') { String::from(parts[1]) } else { alloc::format!("/{}", parts[1]) };
+    let src = crate::shell::state::resolve_path(parts[0]);
+    let dst = crate::shell::state::resolve_path(parts[1]);
 
-    let mut fs = state::MEMFS.lock();
-    let content = match fs.files.remove(&src) {
-        Some(c) => c,
-        None => { println!("mv: '{}': No such file", parts[0]); return; }
+    // Read source
+    let vfs = crate::fs::VFS.lock();
+    let mut buf = vec![0u8; 4096];
+    let n = match vfs.read_file(&src, 0, &mut buf) {
+        Ok(n) => n,
+        Err(e) => { println!("mv: {}: {}", parts[0], e); return; }
     };
+    drop(vfs);
 
-    fs.files.insert(dst, content);
-    println!("Moved {} -> {}", parts[0], parts[1]);
-    state::log_cmd(&alloc::format!("mv {} {}", parts[0], parts[1]));
+    // Write to dest, remove source
+    let mut vfs = crate::fs::VFS.lock();
+    if !vfs.exists(&dst) {
+        let _ = vfs.create(&dst);
+    }
+    match vfs.write_file(&dst, &buf[..n]) {
+        Ok(_) => {
+            let _ = vfs.unlink(&src);
+            println!("Moved {} -> {}", parts[0], parts[1]);
+        },
+        Err(e) => println!("mv: write error: {}", e),
+    }
 }

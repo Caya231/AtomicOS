@@ -12,6 +12,7 @@ pub mod interrupts;
 pub mod memory;
 pub mod scheduler;
 pub mod syscalls;
+pub mod fs;
 pub mod drivers;
 pub mod shell;
 
@@ -29,6 +30,7 @@ pub extern "C" fn _start(multiboot_info_addr: usize) -> ! {
 
     scheduler::init();
     syscalls::init();
+    fs::init();
     drivers::init();
     println!("AtomicOS is successfully running!");
 

@@ -22,3 +22,4 @@ pub mod shellscript;
 pub mod log;
 pub mod spawn;
 pub mod yield_cmd;
+pub mod touch;

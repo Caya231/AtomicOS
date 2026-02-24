@@ -1,8 +1,7 @@
-use crate::println;
-use alloc::string::String;
-use super::super::state;
+use crate::{print, println};
+use alloc::vec;
 
-/// cat <file> — display contents of a file in the in-memory filesystem.
+/// cat <file> — read file contents via VFS.
 pub fn run(args: &str) {
     let filename = args.trim();
     if filename.is_empty() {
@@ -10,12 +9,20 @@ pub fn run(args: &str) {
         return;
     }
 
-    let full = if filename.starts_with('/') { String::from(filename) } else { alloc::format!("/{}", filename) };
+    let path = crate::shell::state::resolve_path(filename);
+    let vfs = crate::fs::VFS.lock();
 
-    let fs = state::MEMFS.lock();
-    match fs.files.get(&full) {
-        Some(Some(content)) => println!("{}", content),
-        Some(None) => println!("cat: {}: Is a directory", filename),
-        None => println!("cat: {}: No such file", filename),
+    // Read up to 4 KiB
+    let mut buf = vec![0u8; 4096];
+    match vfs.read_file(&path, 0, &mut buf) {
+        Ok(n) => {
+            if let Ok(text) = core::str::from_utf8(&buf[..n]) {
+                print!("{}", text);
+                if !text.ends_with('\n') { println!(); }
+            } else {
+                println!("cat: {}: Binary file ({} bytes)", filename, n);
+            }
+        },
+        Err(e) => println!("cat: {}: {}", filename, e),
     }
 }

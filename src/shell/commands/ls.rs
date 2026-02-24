@@ -1,29 +1,30 @@
 use crate::println;
-use super::super::state;
+use crate::fs::inode::FileType;
 
-/// ls [dir] — list entries in the in-memory filesystem.
-/// If no dir is given, lists the current working directory.
+/// ls [dir] — list entries using the VFS.
 pub fn run(args: &str) {
     let target = args.trim();
     let dir = if target.is_empty() {
-        state::CWD.lock().clone()
+        crate::shell::state::CWD.lock().clone()
     } else {
-        state::resolve_path(target)
+        crate::shell::state::resolve_path(target)
     };
 
-    let fs = state::MEMFS.lock();
-    let entries = fs.list_dir(&dir);
-
-    if entries.is_empty() {
-        println!("(empty)");
-    } else {
-        for e in entries {
-            let name = e.rsplit('/').next().unwrap_or(e);
-            if fs.is_dir(e) {
-                println!("  {}/", name);
+    let vfs = crate::fs::VFS.lock();
+    match vfs.readdir(&dir) {
+        Ok(entries) => {
+            if entries.is_empty() {
+                println!("(empty)");
             } else {
-                println!("  {}", name);
+                for e in entries {
+                    if e.inode.file_type == FileType::Directory {
+                        println!("  {}/", e.name);
+                    } else {
+                        println!("  {}  ({}B)", e.name, e.inode.size);
+                    }
+                }
             }
-        }
+        },
+        Err(e) => println!("ls: {}: {}", dir, e),
     }
 }

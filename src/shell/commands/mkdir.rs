@@ -1,8 +1,6 @@
 use crate::println;
-use alloc::string::String;
-use super::super::state;
 
-/// mkdir <path> — create a directory in the in-memory filesystem.
+/// mkdir <path> — create a directory via VFS.
 pub fn run(args: &str) {
     let path = args.trim();
     if path.is_empty() {
@@ -10,14 +8,10 @@ pub fn run(args: &str) {
         return;
     }
 
-    let full = if path.starts_with('/') { String::from(path) } else { alloc::format!("/{}", path) };
-
-    let mut fs = state::MEMFS.lock();
-    if fs.exists(&full) {
-        println!("mkdir: cannot create '{}': File exists", path);
-    } else {
-        fs.files.insert(full, None); // None = directory
-        println!("Created directory: {}", path);
-        state::log_cmd(&alloc::format!("mkdir {}", path));
+    let full = crate::shell::state::resolve_path(path);
+    let mut vfs = crate::fs::VFS.lock();
+    match vfs.mkdir(&full) {
+        Ok(_) => println!("Created directory: {}", path),
+        Err(e) => println!("mkdir: {}: {}", path, e),
     }
 }

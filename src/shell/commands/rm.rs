@@ -1,8 +1,6 @@
 use crate::println;
-use alloc::string::String;
-use super::super::state;
 
-/// rm <path> — remove a file or directory from in-memory fs.
+/// rm <path> — remove a file or empty directory via VFS.
 pub fn run(args: &str) {
     let path = args.trim();
     if path.is_empty() {
@@ -10,18 +8,10 @@ pub fn run(args: &str) {
         return;
     }
 
-    let full = if path.starts_with('/') { String::from(path) } else { alloc::format!("/{}", path) };
-
-    if full == "/" {
-        println!("rm: cannot remove root directory");
-        return;
-    }
-
-    let mut fs = state::MEMFS.lock();
-    if fs.files.remove(&full).is_some() {
-        println!("Removed: {}", path);
-        state::log_cmd(&alloc::format!("rm {}", path));
-    } else {
-        println!("rm: cannot remove '{}': No such file or directory", path);
+    let full = crate::shell::state::resolve_path(path);
+    let mut vfs = crate::fs::VFS.lock();
+    match vfs.unlink(&full) {
+        Ok(()) => println!("Removed: {}", path),
+        Err(e) => println!("rm: {}: {}", path, e),
     }
 }
