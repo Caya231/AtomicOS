@@ -118,6 +118,13 @@ impl Writer {
         }
     }
 
+    pub fn clear_screen(&mut self) {
+        for row in 0..BUFFER_HEIGHT {
+            self.clear_row(row);
+        }
+        self.column_position = 0;
+    }
+
     pub fn write_string(&mut self, s: &str) {
         for byte in s.bytes() {
             match byte {

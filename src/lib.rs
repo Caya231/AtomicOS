@@ -30,18 +30,8 @@ pub extern "C" fn _start() -> ! {
 
     x86_64::instructions::interrupts::enable();
 
-    // Main event loop
-    loop {
-        use crate::drivers::keyboard::scancodes::KeyCode;
-        let key = crate::drivers::keyboard::read_char();
-        
-        match key {
-            KeyCode::Char(c) => print!("{}", c),
-            KeyCode::Enter => println!(),
-            KeyCode::Backspace => crate::vga::WRITER.lock().backspace(),
-            KeyCode::Unknown => {}
-        }
-    }
+    // Transfer control to TTY Event Loop
+    crate::drivers::tty::process_input_loop();
 }
 
 #[panic_handler]

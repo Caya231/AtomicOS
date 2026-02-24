@@ -15,6 +15,7 @@ pub static PICS: Mutex<ChainedPics> = Mutex::new(unsafe { ChainedPics::new(PIC_1
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard = PIC_1_OFFSET + 1,
+    Mouse = PIC_1_OFFSET + 12, // IRQ12 is on PIC2, which maps dynamically to PIC_1_OFFSET + 12
 }
 
 impl InterruptIndex {
@@ -41,6 +42,8 @@ lazy_static! {
             .set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()]
             .set_handler_fn(keyboard_interrupt_handler);
+        idt[InterruptIndex::Mouse.as_usize()]
+            .set_handler_fn(mouse_interrupt_handler);
         idt
     };
 }
@@ -95,6 +98,21 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    }
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(
+    _stack_frame: InterruptStackFrame)
+{
+    use x86_64::instructions::port::Port;
+    let mut port: Port<u8> = Port::new(0x60);
+    let packet = unsafe { port.read() };
+
+    crate::drivers::mouse::push_byte(packet);
+
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
     }
 }
 

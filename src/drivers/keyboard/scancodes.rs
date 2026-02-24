@@ -3,23 +3,65 @@ pub enum KeyCode {
     Char(char),
     Enter,
     Backspace,
+    Space,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    F(u8),
     Unknown,
 }
 
 pub struct KeyboardState {
     shift_pressed: bool,
+    ctrl_pressed: bool,
+    alt_pressed: bool,
+    caps_lock: bool,
+    extended_scancode: bool,
 }
 
 impl KeyboardState {
     pub const fn new() -> Self {
         Self {
             shift_pressed: false,
+            ctrl_pressed: false,
+            alt_pressed: false,
+            caps_lock: false,
+            extended_scancode: false,
         }
     }
 
     pub fn process_scancode(&mut self, scancode: u8) -> KeyCode {
-        // Set 1 Make Codes and Break Codes Handlers
-        match scancode {
+        if scancode == 0xE0 {
+            self.extended_scancode = true;
+            return KeyCode::Unknown;
+        }
+
+        let is_extended = self.extended_scancode;
+        self.extended_scancode = false; // Reset after reading
+
+        if is_extended {
+            // Extended Set 1
+            match scancode {
+                // Keypad Arrows (Make)
+                0x48 => KeyCode::ArrowUp,
+                0x4B => KeyCode::ArrowLeft,
+                0x4D => KeyCode::ArrowRight,
+                0x50 => KeyCode::ArrowDown,
+                
+                // Right Ctrl
+                0x1D => { self.ctrl_pressed = true; KeyCode::Unknown }
+                0x9D => { self.ctrl_pressed = false; KeyCode::Unknown }
+
+                // Right Alt
+                0x38 => { self.alt_pressed = true; KeyCode::Unknown }
+                0xB8 => { self.alt_pressed = false; KeyCode::Unknown }
+
+                _ => KeyCode::Unknown,
+            }
+        } else {
+            // Standard Set 1 Make Codes and Break Codes Handlers
+            match scancode {
             // Numbers
             0x02 => self.char_with_shift('1', '!'),
             0x03 => self.char_with_shift('2', '@'),
@@ -80,24 +122,52 @@ impl KeyboardState {
                 self.shift_pressed = true;
                 KeyCode::Unknown
             },
-            
+            0x1D => { self.ctrl_pressed = true; KeyCode::Unknown }, // LCtrl
+            0x38 => { self.alt_pressed = true; KeyCode::Unknown }, // LAlt
+            0x3A => { self.caps_lock = !self.caps_lock; KeyCode::Unknown }, // CapsLock (Toggle)
+
             // Modifiers Break
             0xAA | 0xB6 => { // LShift / RShift release (scancode + 0x80)
                 self.shift_pressed = false;
                 KeyCode::Unknown
             },
+            0x9D => { self.ctrl_pressed = false; KeyCode::Unknown }, // LCtrl
+            0xB8 => { self.alt_pressed = false; KeyCode::Unknown }, // LAlt
 
             // Control Keys
-            0x39 => KeyCode::Char(' '),
+            0x39 => KeyCode::Space,
             0x1C => KeyCode::Enter,
             0x0E => KeyCode::Backspace,
+            
+            // Function Keys
+            0x3B => KeyCode::F(1),
+            0x3C => KeyCode::F(2),
+            0x3D => KeyCode::F(3),
+            0x3E => KeyCode::F(4),
+            0x3F => KeyCode::F(5),
+            0x40 => KeyCode::F(6),
+            0x41 => KeyCode::F(7),
+            0x42 => KeyCode::F(8),
+            0x43 => KeyCode::F(9),
+            0x44 => KeyCode::F(10),
+            0x57 => KeyCode::F(11),
+            0x58 => KeyCode::F(12),
 
             _ => KeyCode::Unknown,
+        }
         }
     }
 
     fn char_with_shift(&self, lower: char, upper: char) -> KeyCode {
-        if self.shift_pressed {
+        let is_letter = lower.is_ascii_lowercase();
+        
+        let shift_active = if is_letter && self.caps_lock {
+            !self.shift_pressed
+        } else {
+            self.shift_pressed
+        };
+
+        if shift_active {
             KeyCode::Char(upper)
         } else {
             KeyCode::Char(lower)
