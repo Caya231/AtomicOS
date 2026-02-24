@@ -43,6 +43,7 @@ pub fn exec_command(input: &str) {
         "touch"       => commands::touch::run(args),
         "vfstest"     => commands::vfstest::run(args),
         "write"       => commands::write::run(args),
+        "atatest"     => commands::atatest::run(args),
         _             => println!("{}: command not found", cmd),
     }
 }

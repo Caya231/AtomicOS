@@ -32,7 +32,8 @@ BOOT_OBJS := $(AS_OBJS) $(C_OBJS)
 
 # --- QEMU ---
 QEMU     := qemu-system-x86_64
-QEMU_ARGS := -cdrom $(ISO_FILE) -serial stdio -m 128M
+DISK_IMG  := build/disk.img
+QEMU_ARGS := -cdrom $(ISO_FILE) -drive format=raw,file=$(DISK_IMG),if=ide -serial stdio -m 128M
 QEMU_DBG  := $(QEMU_ARGS) -s -S -d int -no-reboot -no-shutdown
 
 # ============================================================================
@@ -86,6 +87,7 @@ iso: $(KERNEL_BIN)
 # --- Run in QEMU ---
 run: iso
 	@echo "[QEMU] Booting AtomicOS..."
+	@test -f $(DISK_IMG) || (echo "[DISK] Creating 16MB disk image..." && dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null)
 	$(QEMU) $(QEMU_ARGS)
 
 # --- Debug with GDB ---
