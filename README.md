@@ -1,53 +1,53 @@
 # AtomicOS
 
-AtomicOS é um sistema operacional escrito em Rust (arquitetura x86_64) projetado para demonstrar princípios de segurança de memória, modularidade e expansão futura. Ele possui um bootloader nativo compatível com Multiboot2 escrito em ASM, lidando com a GDT, IDT (Interrupções de Hardware/Exceções da CPU), e uma estrutura preparatória para Paginação, Alocadores de Frame e módulos futuros de SO (Scheduler, Syscalls e Drivers).
+AtomicOS is an operating system written in Rust (x86_64 architecture) designed to demonstrate principles of memory safety, modularity, and future expansion. It features a native Multiboot2-compliant bootloader written in Assembly, handling the GDT, IDT (Hardware Interrupts/CPU Exceptions), and a preparatory structure for Paging, Frame Allocators, and future OS modules (Scheduler, Syscalls, and Drivers).
 
-## Pré-requisitos
+## Prerequisites
 
-O sistema baseia-se fortemente em ferramentas GNU para gerar o empacotamento da `.iso` bootável suportada por BIOS e UEFI através do GRUB.
+The system relies heavily on GNU tools to generate the bootable `.iso` packaging supported by BIOS and UEFI via GRUB.
 
-Você necessita ter instalado (em Ubuntu/Debian):
+You need to have installed (on Ubuntu/Debian):
 ```bash
 sudo apt update
 sudo apt install nasm qemu-system-x86 build-essential grub-pc-bin grub-common xorriso
 ```
 
-Você também precisa da ferramenta fundamental da arquitetura Rust, setada para a versão `nightly`:
+You also need the fundamental tool of the Rust architecture, set to the `nightly` version:
 ```bash
 rustup override set nightly
 rustup component add rust-src llvm-tools-preview
 ```
 
-## Estrutura de Diretórios e Componentes
+## Directory Structure and Components
 
-- `boot/*.asm`: Entrada em Assembly para conformidade com Multiboot2, setagem de Paginação para Identidade, e salto de 32-bit (Protected Mode) para 64-bit (Long Mode).
-- `linker.ld`: Linker script para definir que o Kernel é carregado confortavelmente a partir de 1M no espaço de memória.
-- `src/lib.rs` (e módulos submetidos em `src/`): Kernel em Rust puro (`no_std`) que assume a execução após o bootloader, inicializando a VGA, Serial (COM1), GDT, IDT, PIC e alocadores iniciais.
+- `boot/*.asm`: Assembly entry for Multiboot2 compliance, Identity Paging setup, and 32-bit (Protected Mode) to 64-bit (Long Mode) jump.
+- `linker.ld`: Linker script defining that the Kernel is comfortably loaded from 1M in the memory space.
+- `src/lib.rs` (and submodules in `src/`): Pure Rust Kernel (`no_std`) that takes over execution after the bootloader, initializing the VGA, Serial (COM1), GDT, IDT, PIC, advanced input drivers (PS/2 Keyboard & Mouse), Virtual TTY, and initial allocators.
 
-## Instruções de Uso
+## Usage Instructions
 
-### 1. Compilação (Apenas Kernel e Bootloader)
-Para compilar apenas os objetos (Assembly) e a library do Kernel (Rust), além de mesclá-los utilizando o `ld`:
+### 1. Compilation (Kernel and Bootloader Only)
+To compile only the objects (Assembly) and the Kernel library (Rust), as well as merging them using `ld`:
 
 ```bash
 make
 ```
-*(Ele irá executar implicitamente `make iso`).*
+*(This will implicitly run `make iso`).*
 
-### 2. Rodando no QEMU
-Você pode automaticamente testar o sistema no emulador oficial x86 usando um script local ou via `make`:
+### 2. Running in QEMU
+You can automatically test the system in the official x86 emulator using a local script or via `make`:
 
 ```bash
 ./run.sh
 ```
-Ou:
+Or:
 ```bash
 make run
 ```
-Isso invoca o `qemu-system-x86_64` exibindo a interface VGA e embutindo a UART Serial no `stdio` do terminal para leitura dos logs kernel.
+This invokes `qemu-system-x86_64` displaying the VGA interface and embedding the Serial UART in the terminal's `stdio` for reading kernel logs.
 
-### 3. Limpeza do Projeto
-Para limpar as pastas de alvo geradas (`/target` e `/build`), basta rodar:
+### 3. Cleaning the Project
+To clean the generated target folders (`/target` and `/build`), simply run:
 ```bash
 make clean
 ```
