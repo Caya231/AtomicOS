@@ -1,8 +1,12 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
+#![feature(alloc_error_handler)]
 
 pub mod vga;
 pub mod serial;
+pub mod allocator;
+
+extern crate alloc;
 pub mod interrupts;
 pub mod memory;
 pub mod scheduler;
@@ -12,21 +16,19 @@ pub mod drivers;
 use core::panic::PanicInfo;
 
 #[no_mangle]
-pub extern "C" fn _start() -> ! {
+pub extern "C" fn _start(multiboot_info_addr: usize) -> ! {
     vga::init();
     serial::init();
     interrupts::init();
     log_info!("AtomicOS Kernel started.");
     
-    memory::init();
+    memory::init(multiboot_info_addr);
     log_info!("AtomicOS Memory intialized.");
 
     scheduler::init();
     syscalls::init();
     drivers::init();
     println!("AtomicOS is successfully running!");
-
-    x86_64::instructions::interrupts::enable();
 
     x86_64::instructions::interrupts::enable();
 

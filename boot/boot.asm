@@ -6,6 +6,9 @@ bits 32
 start:
     mov esp, stack_top
 
+    ; Save Multiboot info pointer (ebx contains the 32-bit physical address)
+    mov edi, ebx
+
     call check_multiboot
     call check_cpuid
     call check_long_mode

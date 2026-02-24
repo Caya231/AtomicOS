@@ -20,7 +20,7 @@ $(AS_OBJS): build/boot/%.o : boot/%.asm | build/boot
 	$(AS) $(ASFLAGS) $< -o $@
 
 kernel:
-	cargo build -Z build-std=core,compiler_builtins -Z json-target-spec --target target.json --release
+	cargo build -Z build-std=core,alloc,compiler_builtins -Z json-target-spec --target target.json --release
 
 $(KERNEL_BIN): kernel $(AS_OBJS) linker.ld
 	mkdir -p build
