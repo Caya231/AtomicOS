@@ -1,13 +1,11 @@
 use crate::println;
-use super::super::state;
 
-/// ps — list active processes (simulated).
+/// ps — list active tasks from the real scheduler.
 pub fn run(_args: &str) {
-    state::log_cmd("ps");
-    let table = state::PROCS.lock();
+    let tasks = crate::scheduler::list_tasks();
     println!("  PID  STATE      NAME");
     println!("  ---  ---------  ----");
-    for p in &table.procs {
-        println!("  {:>3}  {:9}  {}", p.pid, p.state, p.name);
+    for (pid, name, state) in &tasks {
+        println!("  {:>3}  {:9}  {}", pid, state, name);
     }
 }

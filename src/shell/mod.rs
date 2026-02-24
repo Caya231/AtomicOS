@@ -38,6 +38,8 @@ pub fn exec_command(input: &str) {
         "objdump"     => commands::objdump::run(args),
         "shellscript" => commands::shellscript::run(args),
         "log"         => commands::log::run(args),
+        "spawn"       => commands::spawn::run(args),
+        "yield"       => commands::yield_cmd::run(args),
         _             => println!("{}: command not found", cmd),
     }
 }

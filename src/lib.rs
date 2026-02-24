@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
+#![feature(naked_functions)]
 
 pub mod vga;
 pub mod serial;
