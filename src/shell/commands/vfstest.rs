@@ -1,20 +1,26 @@
-use crate::println;
 use alloc::vec;
 
 /// vfstest — automated VFS integration test suite.
+/// Output goes to both VGA (println) and serial (log_info).
 pub fn run(_args: &str) {
-    println!("=== VFS Integration Test Suite ===");
-    println!();
+    macro_rules! test_log {
+        ($($arg:tt)*) => {
+            crate::println!($($arg)*);
+            crate::log_info!($($arg)*);
+        }
+    }
 
-    let mut pass = 0;
-    let mut fail = 0;
+    test_log!("=== VFS Integration Test Suite ===");
+
+    let mut pass = 0u32;
+    let mut fail = 0u32;
 
     // Test 1: mkdir
     {
         let mut vfs = crate::fs::VFS.lock();
         match vfs.mkdir("/vfstest_dir") {
-            Ok(_) => { println!("[PASS] mkdir /vfstest_dir"); pass += 1; },
-            Err(e) => { println!("[FAIL] mkdir /vfstest_dir: {}", e); fail += 1; },
+            Ok(_) => { test_log!("[PASS] mkdir /vfstest_dir"); pass += 1; },
+            Err(e) => { test_log!("[FAIL] mkdir /vfstest_dir: {}", e); fail += 1; },
         }
     }
 
@@ -22,8 +28,8 @@ pub fn run(_args: &str) {
     {
         let mut vfs = crate::fs::VFS.lock();
         match vfs.create("/vfstest_dir/hello.txt") {
-            Ok(_) => { println!("[PASS] create /vfstest_dir/hello.txt"); pass += 1; },
-            Err(e) => { println!("[FAIL] create: {}", e); fail += 1; },
+            Ok(_) => { test_log!("[PASS] create /vfstest_dir/hello.txt"); pass += 1; },
+            Err(e) => { test_log!("[FAIL] create: {}", e); fail += 1; },
         }
     }
 
@@ -31,8 +37,8 @@ pub fn run(_args: &str) {
     {
         let mut vfs = crate::fs::VFS.lock();
         match vfs.write_file("/vfstest_dir/hello.txt", b"Hello from VFS!") {
-            Ok(n) => { println!("[PASS] write {} bytes", n); pass += 1; },
-            Err(e) => { println!("[FAIL] write: {}", e); fail += 1; },
+            Ok(n) => { test_log!("[PASS] write {} bytes", n); pass += 1; },
+            Err(e) => { test_log!("[FAIL] write: {}", e); fail += 1; },
         }
     }
 
@@ -44,12 +50,12 @@ pub fn run(_args: &str) {
             Ok(n) => {
                 let text = core::str::from_utf8(&buf[..n]).unwrap_or("???");
                 if text == "Hello from VFS!" {
-                    println!("[PASS] read: \"{}\"", text); pass += 1;
+                    test_log!("[PASS] read: \"{}\"", text); pass += 1;
                 } else {
-                    println!("[FAIL] read mismatch: \"{}\"", text); fail += 1;
+                    test_log!("[FAIL] read mismatch: \"{}\"", text); fail += 1;
                 }
             },
-            Err(e) => { println!("[FAIL] read: {}", e); fail += 1; },
+            Err(e) => { test_log!("[FAIL] read: {}", e); fail += 1; },
         }
     }
 
@@ -59,12 +65,12 @@ pub fn run(_args: &str) {
         match vfs.readdir("/vfstest_dir") {
             Ok(entries) => {
                 if entries.len() == 1 && entries[0].name == "hello.txt" {
-                    println!("[PASS] readdir: found hello.txt"); pass += 1;
+                    test_log!("[PASS] readdir: found hello.txt"); pass += 1;
                 } else {
-                    println!("[FAIL] readdir: unexpected entries ({})", entries.len()); fail += 1;
+                    test_log!("[FAIL] readdir: unexpected entries ({})", entries.len()); fail += 1;
                 }
             },
-            Err(e) => { println!("[FAIL] readdir: {}", e); fail += 1; },
+            Err(e) => { test_log!("[FAIL] readdir: {}", e); fail += 1; },
         }
     }
 
@@ -72,42 +78,42 @@ pub fn run(_args: &str) {
     {
         let mut vfs = crate::fs::VFS.lock();
         match vfs.unlink("/vfstest_dir/hello.txt") {
-            Ok(()) => { println!("[PASS] unlink /vfstest_dir/hello.txt"); pass += 1; },
-            Err(e) => { println!("[FAIL] unlink: {}", e); fail += 1; },
+            Ok(()) => { test_log!("[PASS] unlink /vfstest_dir/hello.txt"); pass += 1; },
+            Err(e) => { test_log!("[FAIL] unlink: {}", e); fail += 1; },
         }
     }
 
-    // Test 7: unlink directory
+    // Test 7: unlink empty directory
     {
         let mut vfs = crate::fs::VFS.lock();
         match vfs.unlink("/vfstest_dir") {
-            Ok(()) => { println!("[PASS] unlink /vfstest_dir (empty dir)"); pass += 1; },
-            Err(e) => { println!("[FAIL] unlink dir: {}", e); fail += 1; },
+            Ok(()) => { test_log!("[PASS] unlink /vfstest_dir (empty dir)"); pass += 1; },
+            Err(e) => { test_log!("[FAIL] unlink dir: {}", e); fail += 1; },
         }
     }
 
-    // Test 8: error handling — cat nonexistent
+    // Test 8: error handling — lookup nonexistent
     {
         let vfs = crate::fs::VFS.lock();
         match vfs.lookup("/does_not_exist.txt") {
             Err(crate::fs::error::FsError::NotFound) => {
-                println!("[PASS] lookup nonexistent -> NotFound"); pass += 1;
+                test_log!("[PASS] lookup nonexistent -> NotFound"); pass += 1;
             },
-            _ => { println!("[FAIL] expected NotFound error"); fail += 1; },
+            _ => { test_log!("[FAIL] expected NotFound error"); fail += 1; },
         }
     }
 
-    // Test 9: /tmp mount point resolution
+    // Test 9: /tmp mount point
     {
         let mut vfs = crate::fs::VFS.lock();
         match vfs.mkdir("/tmp/testdir") {
-            Ok(_) => { println!("[PASS] mkdir /tmp/testdir (via tmpfs)"); pass += 1; },
-            Err(e) => { println!("[FAIL] mkdir /tmp/testdir: {}", e); fail += 1; },
+            Ok(_) => { test_log!("[PASS] mkdir /tmp/testdir (via tmpfs)"); pass += 1; },
+            Err(e) => { test_log!("[FAIL] mkdir /tmp/testdir: {}", e); fail += 1; },
         }
-        let _ = vfs.unlink("/tmp/testdir"); // cleanup
+        let _ = vfs.unlink("/tmp/testdir");
     }
 
-    // Test 10: stress — create 10 dirs without crash
+    // Test 10: stress — 10 dirs
     {
         let mut vfs = crate::fs::VFS.lock();
         let mut ok = true;
@@ -120,17 +126,16 @@ pub fn run(_args: &str) {
             let _ = vfs.unlink(&name);
         }
         if ok {
-            println!("[PASS] stress: 10 mkdir + rm without crash"); pass += 1;
+            test_log!("[PASS] stress: 10 mkdir + rm OK"); pass += 1;
         } else {
-            println!("[FAIL] stress test failed"); fail += 1;
+            test_log!("[FAIL] stress test failed"); fail += 1;
         }
     }
 
-    println!();
-    println!("=== Results: {}/{} passed ===", pass, pass + fail);
+    test_log!("=== Results: {}/{} passed ===", pass, pass + fail);
     if fail == 0 {
-        println!("VFS Phase 4.1 VALIDATED!");
+        test_log!("RAMFS Phase 4.2 VALIDATED!");
     } else {
-        println!("{} test(s) FAILED.", fail);
+        test_log!("{} test(s) FAILED.", fail);
     }
 }
