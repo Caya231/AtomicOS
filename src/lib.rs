@@ -33,11 +33,6 @@ pub extern "C" fn _start(multiboot_info_addr: usize) -> ! {
     fs::init();
     drivers::init();
     println!("AtomicOS is successfully running!");
-    println!();
-
-    // Auto-run VFS integration tests at boot
-    shell::commands::vfstest::run("");
-    println!();
 
     x86_64::instructions::interrupts::enable();
 

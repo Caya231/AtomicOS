@@ -75,7 +75,6 @@ impl FileSystem for RamFs {
 
     fn create(&self, path: &str) -> FsResult<Inode> {
         let path = Self::normalize(path);
-        crate::log_info!("[{}] create: {}", self.label, path);
         let mut nodes = self.nodes.lock();
 
         if nodes.contains_key(&path) {
@@ -104,7 +103,6 @@ impl FileSystem for RamFs {
 
     fn mkdir(&self, path: &str) -> FsResult<Inode> {
         let path = Self::normalize(path);
-        crate::log_info!("[{}] mkdir: {}", self.label, path);
         let mut nodes = self.nodes.lock();
 
         if nodes.contains_key(&path) {
@@ -141,7 +139,6 @@ impl FileSystem for RamFs {
 
     fn read(&self, path: &str, offset: usize, buf: &mut [u8]) -> FsResult<usize> {
         let path = Self::normalize(path);
-        crate::log_info!("[{}] read: {} (offset {})", self.label, path, offset);
         let nodes = self.nodes.lock();
         let node = nodes.get(&path).ok_or(FsError::NotFound)?;
 
@@ -161,7 +158,6 @@ impl FileSystem for RamFs {
 
     fn write(&self, path: &str, offset: usize, data: &[u8]) -> FsResult<usize> {
         let path = Self::normalize(path);
-        crate::log_info!("[{}] write: {} ({} bytes at offset {})", self.label, path, data.len(), offset);
         let mut nodes = self.nodes.lock();
         let node = nodes.get_mut(&path).ok_or(FsError::NotFound)?;
 
@@ -181,7 +177,6 @@ impl FileSystem for RamFs {
 
     fn readdir(&self, path: &str) -> FsResult<Vec<DirEntry>> {
         let path = Self::normalize(path);
-        crate::log_info!("[{}] readdir: {}", self.label, path);
         let nodes = self.nodes.lock();
         let node = nodes.get(&path).ok_or(FsError::NotFound)?;
 
@@ -209,7 +204,6 @@ impl FileSystem for RamFs {
 
     fn unlink(&self, path: &str) -> FsResult<()> {
         let path = Self::normalize(path);
-        crate::log_info!("[{}] unlink: {}", self.label, path);
         if path == "/" {
             return Err(FsError::InvalidPath);
         }
