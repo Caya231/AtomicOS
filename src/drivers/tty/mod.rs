@@ -9,7 +9,9 @@ pub fn init() {
 }
 
 pub fn print_prompt() {
-    print!("root@atomicos:~$ ");
+    let cwd = crate::shell::state::CWD.lock().clone();
+    let display = if cwd == "/" { "~".into() } else { cwd };
+    print!("root@atomicos:{}$ ", display);
 }
 
 pub fn process_input_loop() -> ! {

@@ -27,6 +27,7 @@ pub fn exec_command(input: &str) {
         "uptime"      => commands::uptime::run(args),
         "version"     => commands::version::run(args),
         "neofetch"    => commands::neofetch::run(args),
+        "cd"          => commands::cd::run(args),
         "ps"          => commands::ps::run(args),
         "kill"        => commands::kill::run(args),
         "mkdir"       => commands::mkdir::run(args),

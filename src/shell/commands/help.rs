@@ -7,6 +7,7 @@ pub fn run(_args: &str) {
     println!("  ls [dir]          List files in directory");
     println!("  cat <file>        Show file contents");
     println!("  clear             Clear the screen");
+    println!("  cd [dir]          Change directory");
     println!("  help              Show this help message");
     println!("  date              Show current date/time (RTC)");
     println!("  whoami            Show current user");

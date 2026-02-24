@@ -9,6 +9,7 @@ pub mod pwd;
 pub mod uptime;
 pub mod version;
 pub mod neofetch;
+pub mod cd;
 pub mod ps;
 pub mod kill;
 pub mod mkdir;

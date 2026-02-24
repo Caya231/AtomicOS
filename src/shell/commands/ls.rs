@@ -1,11 +1,18 @@
 use crate::println;
 use super::super::state;
 
-/// ls — list entries in the in-memory filesystem.
+/// ls [dir] — list entries in the in-memory filesystem.
+/// If no dir is given, lists the current working directory.
 pub fn run(args: &str) {
-    let dir = if args.trim().is_empty() { "/" } else { args.trim() };
+    let target = args.trim();
+    let dir = if target.is_empty() {
+        state::CWD.lock().clone()
+    } else {
+        state::resolve_path(target)
+    };
+
     let fs = state::MEMFS.lock();
-    let entries = fs.list_dir(dir);
+    let entries = fs.list_dir(&dir);
 
     if entries.is_empty() {
         println!("(empty)");
