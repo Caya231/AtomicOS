@@ -32,6 +32,7 @@ pub extern "C" fn _start(multiboot_info_addr: usize) -> ! {
     syscalls::init();
     fs::init();
     drivers::init();
+    fs::mount_fat32(); // ATA is now available
     println!("AtomicOS is successfully running!");
 
     x86_64::instructions::interrupts::enable();

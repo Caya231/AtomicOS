@@ -87,7 +87,7 @@ iso: $(KERNEL_BIN)
 # --- Run in QEMU ---
 run: iso
 	@echo "[QEMU] Booting AtomicOS..."
-	@test -f $(DISK_IMG) || (echo "[DISK] Creating 16MB disk image..." && dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null)
+	@test -f $(DISK_IMG) || (echo "[DISK] Creating 16MB FAT32 disk image..." && dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null && mkfs.fat -F 32 -n ATOMICOS $(DISK_IMG) >/dev/null)
 	$(QEMU) $(QEMU_ARGS)
 
 # --- Debug with GDB ---
