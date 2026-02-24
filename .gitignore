@@ -1,0 +1,8 @@
+/target
+/build
+Cargo.lock
+qemu-nographic.log
+nohup.out
+*.iso
+*.bin
+*.o
