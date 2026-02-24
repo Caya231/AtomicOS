@@ -14,6 +14,7 @@ pub mod scheduler;
 pub mod syscalls;
 pub mod fs;
 pub mod drivers;
+pub mod loader;
 pub mod shell;
 
 use core::panic::PanicInfo;

@@ -26,3 +26,4 @@ pub mod touch;
 pub mod vfstest;
 pub mod write;
 pub mod atatest;
+pub mod exec;

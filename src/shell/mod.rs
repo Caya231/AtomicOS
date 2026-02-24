@@ -44,6 +44,7 @@ pub fn exec_command(input: &str) {
         "vfstest"     => commands::vfstest::run(args),
         "write"       => commands::write::run(args),
         "atatest"     => commands::atatest::run(args),
+        "exec"        => commands::exec::run(args),
         _             => println!("{}: command not found", cmd),
     }
 }

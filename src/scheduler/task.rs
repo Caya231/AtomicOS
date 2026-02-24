@@ -23,4 +23,6 @@ pub struct Task {
     pub context: Context,
     /// Owned stack memory — kept alive as long as the task exists.
     pub _stack: Box<[u8]>,
+    /// Optional program image memory (ELF loaded programs).
+    pub _image: Option<Box<[u8]>>,
 }

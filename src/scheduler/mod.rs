@@ -51,7 +51,8 @@ impl Scheduler {
             name: alloc::string::String::from(name),
             state: TaskState::Ready,
             context: ctx,
-            _stack: stack, // ownership kept so stack isn't freed
+            _stack: stack,
+            _image: None,
         };
 
         self.ready_queue.push_back(task);
@@ -61,6 +62,31 @@ impl Scheduler {
     /// Pick the next ready task. Returns None if queue is empty.
     pub fn schedule_next(&mut self) -> Option<Task> {
         self.ready_queue.pop_front()
+    }
+
+    /// Spawn a task from a raw entry address (used by ELF loader).
+    /// The `image` holds the program memory and is kept alive as the task's stack owner.
+    pub fn spawn_raw(&mut self, entry: u64, name: &str, image: alloc::vec::Vec<u8>) -> TaskId {
+        let id = TaskId(self.next_id);
+        self.next_id += 1;
+
+        // Allocate a separate stack for the program
+        let stack = vec![0u8; TASK_STACK_SIZE].into_boxed_slice();
+        let stack_top = stack.as_ptr() as usize + TASK_STACK_SIZE;
+
+        let ctx = Context::new(entry, stack_top as u64);
+
+        let task = Task {
+            id,
+            name: alloc::string::String::from(name),
+            state: TaskState::Ready,
+            context: ctx,
+            _stack: stack,
+            _image: Some(image.into_boxed_slice()), // keep program memory alive
+        };
+
+        self.ready_queue.push_back(task);
+        id
     }
 }
 
@@ -77,7 +103,8 @@ pub fn init() {
         name: alloc::string::String::from("kernel"),
         state: TaskState::Running,
         context: Context::empty(),
-        _stack: Box::new([]), // kernel uses the boot stack, not a heap stack
+        _stack: Box::new([]),
+        _image: None,
     };
     sched.current = Some(kernel_task);
     sched.active = true;
