@@ -1,5 +1,6 @@
 pub mod gdt;
 pub mod idt;
+pub mod usermode;
 
 pub fn init() {
     gdt::init();

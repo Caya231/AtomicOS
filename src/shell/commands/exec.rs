@@ -15,6 +15,9 @@ pub fn run(args: &str) {
         Ok(task_id) => {
             println!("[EXEC] Loaded '{}' as task {}", path, task_id);
             crate::log_info!("[EXEC] Loaded '{}' as task {}", path, task_id);
+            
+            // Automatically switch to the newly loaded program
+            crate::scheduler::yield_now();
         }
         Err(e) => {
             println!("[EXEC] Failed: {}", e);

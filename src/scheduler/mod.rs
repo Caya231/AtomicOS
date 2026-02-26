@@ -132,17 +132,24 @@ pub fn yield_now() {
 
         // Take the current task out
         if let Some(mut current) = sched.current.take() {
-            current.state = TaskState::Ready;
-            let current_ctx_ptr = &mut current.context as *mut Context;
-
             // Get next task
             let mut next = sched.ready_queue.pop_front().unwrap();
+
+            current.state = TaskState::Ready;
             next.state = TaskState::Running;
-            let next_ctx_ptr = &next.context as *const Context;
+
+            // Calculate next kernel stack top
+            let next_stack_top = next._stack.as_ptr() as u64 + TASK_STACK_SIZE as u64;
+            crate::interrupts::gdt::set_tss_rsp0(next_stack_top);
 
             // Put current back in queue, set next as current
+            // MOVES HAPPEN HERE: We must do this BEFORE taking pointers!
             sched.ready_queue.push_back(current);
             sched.current = Some(next);
+
+            // NOW grab the valid pointers from their permanent heap locations
+            let current_ctx_ptr = &mut sched.ready_queue.back_mut().unwrap().context as *mut Context;
+            let next_ctx_ptr = &sched.current.as_ref().unwrap().context as *const Context;
 
             // Drop the lock BEFORE switching context
             drop(sched);
@@ -155,31 +162,48 @@ pub fn yield_now() {
 
 /// Terminate the current task and switch to the next one.
 pub fn exit_current() {
+    // Disable interrupts to ensure atomicity
     x86_64::instructions::interrupts::without_interrupts(|| {
         let mut sched = SCHEDULER.lock();
 
-        // Drop current task (its stack will be freed)
+        // 1. Remove the current task. It will be dropped and its memory freed.
         let finished = sched.current.take();
         if let Some(t) = &finished {
             crate::log_info!("Task '{}' (ID {}) exited.", t.name, t.id.0);
         }
         drop(finished);
 
-        // Switch to next or back to idle
+        // 2. We MUST switch to the next task now, since the current one is dead.
         if let Some(mut next) = sched.ready_queue.pop_front() {
             next.state = TaskState::Running;
-            let next_ctx_ptr = &next.context as *const Context;
+            
+            let next_stack_top = next._stack.as_ptr() as u64 + TASK_STACK_SIZE as u64;
+            crate::interrupts::gdt::set_tss_rsp0(next_stack_top);
+            
+            // We must place it in `sched.current` before getting its context pointer.
             sched.current = Some(next);
+            
+            // Get the raw pointer to the next context IN its new memory location.
+            let next_ctx_ptr = &sched.current.as_ref().unwrap().context as *const Context;
+            
+            // Drop scheduler lock before jumping
             drop(sched);
 
-            // Jump to the next task (no save needed, current is dead)
-            unsafe { context::restore_context(next_ctx_ptr); }
+            // 3. Jump to the next task without saving the current state (since it's dead).
+            unsafe {
+                context::restore_context(next_ctx_ptr);
+            }
         } else {
-            // No tasks left — return to kernel idle
-            crate::log_info!("All tasks finished. Returning to shell.");
+            // No tasks left at all (not even the shell).
+            crate::log_info!("All tasks finished. System halted.");
             drop(sched);
+            loop {
+                x86_64::instructions::hlt();
+            }
         }
     });
+
+    unreachable!("exit_current should never return");
 }
 
 /// Get a snapshot of all tasks for display purposes (used by `ps` command).

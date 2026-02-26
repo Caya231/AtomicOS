@@ -37,3 +37,36 @@ pub fn create_mapping(
     };
     map_to_result.expect("Map to failed").flush();
 }
+
+/// Allocate and map memory for a user program at a specific virtual address.
+/// Returns true if successful.
+pub fn allocate_user_memory(start_addr: VirtAddr, size_bytes: u64) -> bool {
+    use x86_64::structures::paging::{PageTableFlags, Page, Mapper};
+    if size_bytes == 0 { return true; }
+
+    let phys_mem_offset = VirtAddr::new(0);
+    let mut mapper = unsafe { init_paging(phys_mem_offset) };
+    let mut frame_allocator = crate::memory::FRAME_ALLOCATOR.lock();
+
+    let start_page = Page::<Size4KiB>::containing_address(start_addr);
+    let end_page = Page::<Size4KiB>::containing_address(start_addr + size_bytes - 1u64);
+
+    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+
+    for page in Page::range_inclusive(start_page, end_page) {
+        // Allocate physical frame
+        let frame = match frame_allocator.allocate_frame() {
+            Some(f) => f,
+            None => return false, // Out of memory
+        };
+
+        // Map it
+        unsafe {
+            match mapper.map_to(page, frame, flags, &mut *frame_allocator) {
+                Ok(flush) => flush.flush(),
+                Err(_) => return false, // Mapping failed
+            }
+        }
+    }
+    true
+}

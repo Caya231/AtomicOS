@@ -9,19 +9,16 @@ use core::fmt;
 
 const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 const ELFCLASS64: u8    = 2;
-const ELFDATA2LSB: u8   = 1;  // Little endian
-const ET_EXEC: u16      = 2;  // Executable file
+const ELFDATA2LSB: u8   = 1;
+const ET_EXEC: u16      = 2;
 const EM_X86_64: u16    = 62;
 const PT_LOAD: u32      = 1;
 
 // ══════════════════════════════════════════════════════════════
-//  ELF64 structures (parsed from bytes)
+//  ELF64 structures
 // ══════════════════════════════════════════════════════════════
 
-/// ELF64 File Header (64 bytes)
 struct Elf64Ehdr {
-    e_type: u16,
-    e_machine: u16,
     e_entry: u64,
     e_phoff: u64,
     e_phentsize: u16,
@@ -30,55 +27,27 @@ struct Elf64Ehdr {
 
 impl Elf64Ehdr {
     fn parse(data: &[u8]) -> Result<Self, ExecError> {
-        if data.len() < 64 {
-            return Err(ExecError::InvalidFormat);
-        }
-
-        // Validate magic
-        if data[0..4] != ELF_MAGIC {
-            return Err(ExecError::InvalidFormat);
-        }
-
-        // Validate class (64-bit)
-        if data[4] != ELFCLASS64 {
-            return Err(ExecError::UnsupportedArch);
-        }
-
-        // Validate endianness (little-endian)
-        if data[5] != ELFDATA2LSB {
-            return Err(ExecError::UnsupportedArch);
-        }
+        if data.len() < 64 { return Err(ExecError::InvalidFormat); }
+        if data[0..4] != ELF_MAGIC { return Err(ExecError::InvalidFormat); }
+        if data[4] != ELFCLASS64 { return Err(ExecError::UnsupportedArch); }
+        if data[5] != ELFDATA2LSB { return Err(ExecError::UnsupportedArch); }
 
         let e_type = u16::from_le_bytes([data[16], data[17]]);
         let e_machine = u16::from_le_bytes([data[18], data[19]]);
-
-        if e_type != ET_EXEC {
-            return Err(ExecError::UnsupportedType);
-        }
-        if e_machine != EM_X86_64 {
-            return Err(ExecError::UnsupportedArch);
-        }
-
-        let e_entry = u64::from_le_bytes(data[24..32].try_into().unwrap());
-        let e_phoff = u64::from_le_bytes(data[32..40].try_into().unwrap());
-        let e_phentsize = u16::from_le_bytes([data[54], data[55]]);
-        let e_phnum = u16::from_le_bytes([data[56], data[57]]);
+        if e_type != ET_EXEC { return Err(ExecError::UnsupportedType); }
+        if e_machine != EM_X86_64 { return Err(ExecError::UnsupportedArch); }
 
         Ok(Elf64Ehdr {
-            e_type,
-            e_machine,
-            e_entry,
-            e_phoff,
-            e_phentsize,
-            e_phnum,
+            e_entry: u64::from_le_bytes(data[24..32].try_into().unwrap()),
+            e_phoff: u64::from_le_bytes(data[32..40].try_into().unwrap()),
+            e_phentsize: u16::from_le_bytes([data[54], data[55]]),
+            e_phnum: u16::from_le_bytes([data[56], data[57]]),
         })
     }
 }
 
-/// ELF64 Program Header (56 bytes)
 struct Elf64Phdr {
     p_type: u32,
-    p_flags: u32,
     p_offset: u64,
     p_vaddr: u64,
     p_filesz: u64,
@@ -87,13 +56,9 @@ struct Elf64Phdr {
 
 impl Elf64Phdr {
     fn parse(data: &[u8]) -> Result<Self, ExecError> {
-        if data.len() < 56 {
-            return Err(ExecError::InvalidFormat);
-        }
-
+        if data.len() < 56 { return Err(ExecError::InvalidFormat); }
         Ok(Elf64Phdr {
             p_type: u32::from_le_bytes(data[0..4].try_into().unwrap()),
-            p_flags: u32::from_le_bytes(data[4..8].try_into().unwrap()),
             p_offset: u64::from_le_bytes(data[8..16].try_into().unwrap()),
             p_vaddr: u64::from_le_bytes(data[16..24].try_into().unwrap()),
             p_filesz: u64::from_le_bytes(data[32..40].try_into().unwrap()),
@@ -130,113 +95,158 @@ impl fmt::Display for ExecError {
 }
 
 // ══════════════════════════════════════════════════════════════
+//  User-mode task info — stored globally so the trampoline can access it
+// ══════════════════════════════════════════════════════════════
+
+use spin::Mutex;
+
+/// Info needed by the usermode trampoline (one at a time).
+struct UserTaskInfo {
+    entry: u64,
+    user_stack_top: u64,
+}
+
+static PENDING_USER_TASK: Mutex<Option<UserTaskInfo>> = Mutex::new(None);
+
+/// Trampoline function — runs as a kernel task, then jumps to Ring 3.
+fn usermode_trampoline() {
+    let info = {
+        let mut pending = PENDING_USER_TASK.lock();
+        pending.take().expect("no pending user task info")
+    };
+
+    let user_cs = crate::interrupts::gdt::user_code_selector().0;
+    let user_ss = crate::interrupts::gdt::user_data_selector().0;
+
+    crate::log_info!("ELF: jumping to Ring 3 — entry={:#x} stack={:#x} cs={:#x} ss={:#x}",
+        info.entry, info.user_stack_top, user_cs, user_ss);
+
+    crate::interrupts::usermode::jump_to_usermode(
+        info.entry,
+        info.user_stack_top,
+        user_cs,
+        user_ss,
+    );
+}
+
+// ══════════════════════════════════════════════════════════════
 //  ELF Loader
 // ══════════════════════════════════════════════════════════════
 
-/// Stack size for loaded programs (16 KiB).
-const PROGRAM_STACK_SIZE: usize = 4096 * 4;
+/// Stack size for user programs (16 KiB).
+const USER_STACK_SIZE: usize = 4096 * 4;
 
-/// Load an ELF64 binary from the filesystem and create a scheduler task.
-/// Returns the task ID on success.
+/// Load an ELF64 binary and create a Ring 3 task.
 pub fn load(path: &str) -> Result<u64, ExecError> {
-    // 1. Read the entire file from VFS
+    // 1. Read entire file
     let file_data = read_file_all(path)?;
 
     // 2. Parse ELF header
     let ehdr = Elf64Ehdr::parse(&file_data)?;
 
-    crate::log_info!("ELF: entry={:#x} phoff={} phnum={} phentsz={}",
-        ehdr.e_entry, ehdr.e_phoff, ehdr.e_phnum, ehdr.e_phentsize);
+    crate::log_info!("ELF: entry={:#x} phoff={} phnum={}", ehdr.e_entry, ehdr.e_phoff, ehdr.e_phnum);
 
-    // 3. Process PT_LOAD segments — copy into a flat memory buffer
-    //    Since we're Ring 0, we allocate a heap buffer and copy segments there.
-    //    The entry point is relative to the loaded segments.
+    // 3. Find load range
     let mut load_base: u64 = u64::MAX;
     let mut load_end: u64 = 0;
 
-    // First pass: find the virtual address range
     for i in 0..ehdr.e_phnum as usize {
         let off = ehdr.e_phoff as usize + i * ehdr.e_phentsize as usize;
         let phdr = Elf64Phdr::parse(&file_data[off..])?;
         if phdr.p_type != PT_LOAD { continue; }
-
-        if phdr.p_vaddr < load_base {
-            load_base = phdr.p_vaddr;
-        }
+        if phdr.p_vaddr < load_base { load_base = phdr.p_vaddr; }
         let seg_end = phdr.p_vaddr + phdr.p_memsz;
-        if seg_end > load_end {
-            load_end = seg_end;
-        }
+        if seg_end > load_end { load_end = seg_end; }
     }
 
     if load_base == u64::MAX {
-        return Err(ExecError::InvalidFormat); // no PT_LOAD segments
+        return Err(ExecError::InvalidFormat);
     }
 
-    let total_size = (load_end - load_base) as usize;
-    crate::log_info!("ELF: load range {:#x}..{:#x} ({} bytes)", load_base, load_end, total_size);
+    // 4. Compute user stack bounds
+    let load_end_aligned = (load_end + 4095) & !4095;
+    let user_stack_base = load_end_aligned;
+    let user_stack_top = user_stack_base + USER_STACK_SIZE as u64;
 
-    // Allocate memory for the program image
-    let mut image = vec![0u8; total_size];
+    // 5. Allocate pages for the ELF segments
+    let image_size = (load_end - load_base) as u64;
+    if !crate::memory::paging::allocate_user_memory(x86_64::VirtAddr::new(load_base), image_size) {
+        return Err(ExecError::MemoryError);
+    }
 
-    // Second pass: copy file data into the image
+    // 6. Allocate pages for the User Stack
+    if !crate::memory::paging::allocate_user_memory(x86_64::VirtAddr::new(user_stack_base), USER_STACK_SIZE as u64) {
+        return Err(ExecError::MemoryError);
+    }
+
+    // 7. Copy file data directly into the allocated memory
     for i in 0..ehdr.e_phnum as usize {
         let off = ehdr.e_phoff as usize + i * ehdr.e_phentsize as usize;
         let phdr = Elf64Phdr::parse(&file_data[off..])?;
         if phdr.p_type != PT_LOAD { continue; }
 
-        let dest_offset = (phdr.p_vaddr - load_base) as usize;
+        let dest_ptr = phdr.p_vaddr as *mut u8;
         let file_offset = phdr.p_offset as usize;
         let file_size = phdr.p_filesz as usize;
 
-        // Copy p_filesz bytes from file
         if file_offset + file_size <= file_data.len() {
-            image[dest_offset..dest_offset + file_size]
-                .copy_from_slice(&file_data[file_offset..file_offset + file_size]);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    file_data[file_offset..].as_ptr(),
+                    dest_ptr,
+                    file_size,
+                );
+            }
         }
-        // p_memsz > p_filesz region is already zeroed (BSS)
+
+        // BSS zeroing
+        if phdr.p_memsz > phdr.p_filesz {
+            let bss_size = (phdr.p_memsz - phdr.p_filesz) as usize;
+            unsafe {
+                core::ptr::write_bytes(dest_ptr.add(file_size), 0, bss_size);
+            }
+        }
     }
 
-    // 4. Calculate the real entry point address in our heap buffer
-    let image_base = image.as_ptr() as u64;
-    let real_entry = image_base + (ehdr.e_entry - load_base);
+    let real_entry = ehdr.e_entry;
 
-    crate::log_info!("ELF: image at {:#x}, entry at {:#x}", image_base, real_entry);
+    crate::log_info!("ELF: mapped at {:#x}, entry={:#x} stack_top={:#x}", load_base, real_entry, user_stack_top);
 
-    // 5. Create a task using spawn_raw
+    // 7. Set pending task info for trampoline
+    {
+        let mut pending = PENDING_USER_TASK.lock();
+        *pending = Some(UserTaskInfo {
+            entry: real_entry,
+            user_stack_top,
+        });
+    }
+
+    // 8. Spawn kernel task that will trampoline to Ring 3
     let task_name = extract_filename(path);
     let task_id = {
         let mut sched = crate::scheduler::SCHEDULER.lock();
-        let id = sched.spawn_raw(real_entry, &task_name, image);
+        let id = sched.spawn_raw(
+            usermode_trampoline as *const () as u64,
+            &task_name,
+            alloc::vec::Vec::new(), // memory is dynamically mapped now
+        );
         id
     };
 
     crate::log_info!("ELF: spawned task '{}' (id {})", task_name, task_id.0);
-
     Ok(task_id.0)
 }
 
-/// Read entire file contents from VFS.
 fn read_file_all(path: &str) -> Result<Vec<u8>, ExecError> {
     let vfs = crate::fs::VFS.lock();
-
-    // First, look up the inode to get file size
     let inode = vfs.lookup(path).map_err(|_| ExecError::FileNotFound)?;
-    let size = inode.size;
-
-    if size == 0 {
-        return Err(ExecError::InvalidFormat);
-    }
-
-    // Read the file
-    let mut buf = vec![0u8; size];
+    if inode.size == 0 { return Err(ExecError::InvalidFormat); }
+    let mut buf = vec![0u8; inode.size];
     let bytes_read = vfs.read_file(path, 0, &mut buf).map_err(|_| ExecError::ReadError)?;
     buf.truncate(bytes_read);
-
     Ok(buf)
 }
 
-/// Extract filename from path (for task name).
 fn extract_filename(path: &str) -> String {
     path.rsplit('/').next().unwrap_or(path).into()
 }

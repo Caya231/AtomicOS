@@ -1,6 +1,6 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use lazy_static::lazy_static;
-use crate::{println, log_error, log_info};
+use crate::{println, log_error};
 use super::gdt;
 use pic8259::ChainedPics;
 use spin::Mutex;
@@ -15,7 +15,7 @@ pub static PICS: Mutex<ChainedPics> = Mutex::new(unsafe { ChainedPics::new(PIC_1
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
     Keyboard = PIC_1_OFFSET + 1,
-    Mouse = PIC_1_OFFSET + 12, // IRQ12 is on PIC2, which maps dynamically to PIC_1_OFFSET + 12
+    Mouse = PIC_1_OFFSET + 12,
 }
 
 impl InterruptIndex {
@@ -44,6 +44,16 @@ lazy_static! {
             .set_handler_fn(keyboard_interrupt_handler);
         idt[InterruptIndex::Mouse.as_usize()]
             .set_handler_fn(mouse_interrupt_handler);
+
+        // Register int 0x80 as syscall handler (DPL=3 so Ring 3 can call it)
+        unsafe {
+            let handler_addr = super::usermode::syscall_handler_asm as u64;
+            let handler_fn: extern "x86-interrupt" fn(InterruptStackFrame) =
+                core::mem::transmute(handler_addr);
+            idt[0x80].set_handler_fn(handler_fn)
+                .set_privilege_level(x86_64::PrivilegeLevel::Ring3);
+        }
+
         idt
     };
 }
@@ -77,7 +87,6 @@ extern "x86-interrupt" fn page_fault_handler(
 extern "x86-interrupt" fn timer_interrupt_handler(
     _stack_frame: InterruptStackFrame)
 {
-    // Increment the global uptime tick counter
     crate::shell::commands::uptime::tick();
 
     unsafe {
@@ -91,10 +100,8 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(
 {
     use x86_64::instructions::port::Port;
     let mut port: Port<u8> = Port::new(0x60);
-    // Lê o scancode da porta 0x60
     let scancode = unsafe { port.read() };
 
-    // Envia o scancode para o driver de teclado processar
     crate::drivers::keyboard::push_scancode(scancode);
 
     unsafe {
