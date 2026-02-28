@@ -20,7 +20,7 @@ pub fn run(args: &str) {
 
     // Remove task from scheduler ready queue
     let mut sched = crate::scheduler::SCHEDULER.lock();
-    if let Some(pos) = sched.ready_queue.iter().position(|t| t.id.0 == pid) {
+    if let Some(pos) = sched.ready_queue.iter().position(|t| t.pid.0 == pid) {
         let task = sched.ready_queue.remove(pos).unwrap();
         println!("Terminated task '{}' (pid {})", task.name, pid);
     } else {

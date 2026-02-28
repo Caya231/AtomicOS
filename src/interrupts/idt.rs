@@ -47,7 +47,7 @@ lazy_static! {
 
         // Register int 0x80 as syscall handler (DPL=3 so Ring 3 can call it)
         unsafe {
-            let handler_addr = super::usermode::syscall_handler_asm as u64;
+            let handler_addr = super::usermode::syscall_handler_asm as *const () as u64;
             let handler_fn: extern "x86-interrupt" fn(InterruptStackFrame) =
                 core::mem::transmute(handler_addr);
             idt[0x80].set_handler_fn(handler_fn)
@@ -93,6 +93,9 @@ extern "x86-interrupt" fn timer_interrupt_handler(
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
+    
+    // Enable Preemptive Multitasking!
+    crate::scheduler::try_yield_now();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(

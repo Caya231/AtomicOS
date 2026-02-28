@@ -26,6 +26,11 @@ pub extern "C" fn syscall_handler_asm() {
         "push rbx",
         "push rcx",
 
+        // Align the stack strictly to 16-bytes as required by System V AMD64 ABI
+        // CPU pushes 5 QWORDS (40 bytes), we push 14 QWORDS (112 bytes) = 152 bytes total.
+        // 152 is not divisible by 16! It's off by 8 bytes.
+        "sub rsp, 8",
+
         // Call Rust dispatcher: dispatch(rax, rdi, rsi, rdx)
         // System V ABI: arg0=rdi, arg1=rsi, arg2=rdx, arg3=rcx
         // We need: rdi=number(was rax), rsi=arg0(was rdi), rdx=arg1(was rsi), rcx=arg2(was rdx)
@@ -34,6 +39,9 @@ pub extern "C" fn syscall_handler_asm() {
         "mov rsi, rdi",   // arg0 → rsi (2nd param)
         "mov rdi, rax",   // number → rdi (1st param)
         "call {dispatch}",
+
+        // Un-align stack before resuming context POP routines
+        "add rsp, 8",
 
         // Return value is in RAX — it'll be restored to user's RAX
 

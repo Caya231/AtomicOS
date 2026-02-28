@@ -97,6 +97,7 @@ pub fn read_char() -> KeyCode {
         if let Some(key) = try_read_char() {
             return key;
         }
+        crate::scheduler::yield_now();
         x86_64::instructions::hlt();
     }
 }

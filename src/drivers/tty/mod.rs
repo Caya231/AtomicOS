@@ -15,6 +15,7 @@ pub fn print_prompt() {
 }
 
 pub fn process_input_loop() -> ! {
+    x86_64::instructions::interrupts::enable();
     let mut command_buffer = String::new();
 
     loop {

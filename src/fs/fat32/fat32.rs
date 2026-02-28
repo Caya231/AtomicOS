@@ -22,9 +22,9 @@ const FAT_EOC: u32   = 0x0FFF_FFF8; // end-of-chain marker (>= this)
 const FAT_FREE: u32  = 0x0000_0000;
 
 // Directory entry attribute bits
-const ATTR_READ_ONLY: u8 = 0x01;
-const ATTR_HIDDEN: u8    = 0x02;
-const ATTR_SYSTEM: u8    = 0x04;
+// const ATTR_READ_ONLY: u8 = 0x01;
+// const ATTR_HIDDEN: u8    = 0x02;
+// const ATTR_SYSTEM: u8    = 0x04;
 const ATTR_VOLUME_ID: u8 = 0x08;
 const ATTR_DIRECTORY: u8 = 0x10;
 const ATTR_ARCHIVE: u8   = 0x20;
@@ -38,7 +38,7 @@ const ATTR_LFN: u8       = 0x0F;
 struct Bpb {
     bytes_per_sector: u16,
     sectors_per_cluster: u8,
-    reserved_sectors: u16,
+    _reserved_sectors: u16,
     num_fats: u8,
     total_sectors: u32,
     fat_size: u32,         // sectors per FAT
@@ -78,7 +78,7 @@ impl Bpb {
         Ok(Bpb {
             bytes_per_sector,
             sectors_per_cluster,
-            reserved_sectors,
+            _reserved_sectors: reserved_sectors,
             num_fats,
             total_sectors,
             fat_size,

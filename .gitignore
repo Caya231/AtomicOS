@@ -7,3 +7,7 @@ nohup.out
 *.bin
 *.o
 *.log
+
+*.elf
+test_sizeof
+

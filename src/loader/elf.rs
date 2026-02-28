@@ -95,38 +95,43 @@ impl fmt::Display for ExecError {
 }
 
 // ══════════════════════════════════════════════════════════════
-//  User-mode task info — stored globally so the trampoline can access it
+//  Usermode Trampoline
 // ══════════════════════════════════════════════════════════════
 
-use spin::Mutex;
+/// Trampoline function — runs as a kernel task starting point for Ring 3 processes.
+/// Since it's a raw entry, we receive the target entry and stack via registers R12 and R13
+/// which we will craft manually in the `Context` builder.
+#[unsafe(naked)]
+pub extern "C" fn usermode_trampoline() {
+    unsafe {
+        core::arch::naked_asm!(
+            "
+            // R12 = user_entry
+            // R13 = user_stack_top
+            
+            // Log entry
+            // (Skipped complex logging in naked assembly for stability)
 
-/// Info needed by the usermode trampoline (one at a time).
-struct UserTaskInfo {
-    entry: u64,
-    user_stack_top: u64,
-}
+            // Calculate selectors
+            // user_cs = 0x23 (Index 4, RPL 3)
+            // user_ss = 0x1B (Index 3, RPL 3)
+            mov ax, 0x1B
+            mov ds, ax
+            mov es, ax
+            mov fs, ax
+            mov gs, ax
 
-static PENDING_USER_TASK: Mutex<Option<UserTaskInfo>> = Mutex::new(None);
+            // IRETQ Frame construction on the Kernel Stack
+            push 0x1B         // SS
+            push r13          // RSP
+            push 0x202        // RFLAGS (Interrupts enabled)
+            push 0x23         // CS
+            push r12          // RIP (entry point)
 
-/// Trampoline function — runs as a kernel task, then jumps to Ring 3.
-fn usermode_trampoline() {
-    let info = {
-        let mut pending = PENDING_USER_TASK.lock();
-        pending.take().expect("no pending user task info")
-    };
-
-    let user_cs = crate::interrupts::gdt::user_code_selector().0;
-    let user_ss = crate::interrupts::gdt::user_data_selector().0;
-
-    crate::log_info!("ELF: jumping to Ring 3 — entry={:#x} stack={:#x} cs={:#x} ss={:#x}",
-        info.entry, info.user_stack_top, user_cs, user_ss);
-
-    crate::interrupts::usermode::jump_to_usermode(
-        info.entry,
-        info.user_stack_top,
-        user_cs,
-        user_ss,
-    );
+            iretq             // Jump to Ring 3!
+            "
+        );
+    }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -136,17 +141,49 @@ fn usermode_trampoline() {
 /// Stack size for user programs (16 KiB).
 const USER_STACK_SIZE: usize = 4096 * 4;
 
-/// Load an ELF64 binary and create a Ring 3 task.
+/// Load an ELF64 binary and create a Ring 3 task (Legacy boot support API).
 pub fn load(path: &str) -> Result<u64, ExecError> {
-    // 1. Read entire file
-    let file_data = read_file_all(path)?;
+    let params = parse_and_map_elf(path)?;
 
-    // 2. Parse ELF header
+    // 8. Spawn process using Phase 5.3 Custom Scheduler Builder
+    let task_name = extract_filename(path);
+    
+    let task_id = crate::scheduler::spawn_process(
+        &task_name,
+        params.page_table,
+        usermode_trampoline as *const () as u64, // The Ring 0 kernel entry of this new process
+        params.user_stack_top,
+        params.allocations,
+    );
+    
+    // Inject R12 and R13 into the freshly spawned process Context to feed the trampoline
+    {
+        let mut sched = crate::scheduler::SCHEDULER.lock();
+        if let Some(proc) = sched.ready_queue.iter_mut().find(|p| p.pid == task_id) {
+            proc.context.r12 = params.entry;
+            proc.context.r13 = params.user_stack_top;
+        }
+    }
+
+    crate::log_info!("ELF: spawned process '{}' (PID {})", task_name, task_id.0);
+    Ok(task_id.0)
+}
+
+/// Represents the extracted core parameters of an ELF binary 
+/// used to execute it seamlessly on an isolated Page Table.
+pub struct ElfExecParams {
+    pub page_table: u64,
+    pub entry: u64,
+    pub user_stack_top: u64,
+    pub allocations: alloc::vec::Vec<(u64, u64)>,
+}
+
+/// Parse and map an ELF into a brand new isolated Address Space.
+/// Returns the mapping parameters without modifying the scheduler.
+pub fn parse_and_map_elf(path: &str) -> Result<ElfExecParams, ExecError> {
+    let file_data = read_file_all(path)?;
     let ehdr = Elf64Ehdr::parse(&file_data)?;
 
-    crate::log_info!("ELF: entry={:#x} phoff={} phnum={}", ehdr.e_entry, ehdr.e_phoff, ehdr.e_phnum);
-
-    // 3. Find load range
     let mut load_base: u64 = u64::MAX;
     let mut load_end: u64 = 0;
 
@@ -159,27 +196,39 @@ pub fn load(path: &str) -> Result<u64, ExecError> {
         if seg_end > load_end { load_end = seg_end; }
     }
 
-    if load_base == u64::MAX {
-        return Err(ExecError::InvalidFormat);
-    }
+    if load_base == u64::MAX { return Err(ExecError::InvalidFormat); }
 
-    // 4. Compute user stack bounds
     let load_end_aligned = (load_end + 4095) & !4095;
     let user_stack_base = load_end_aligned;
     let user_stack_top = user_stack_base + USER_STACK_SIZE as u64;
 
-    // 5. Allocate pages for the ELF segments
+    let new_p4_phys = crate::memory::paging::create_new_page_table().ok_or(ExecError::MemoryError)?;
+    let mut mapped_allocations = alloc::vec::Vec::new();
+    
+    use x86_64::registers::control::Cr3;
+    let (old_p4, flags) = Cr3::read();
+    
+    unsafe {
+        let new_frame = x86_64::structures::paging::PhysFrame::containing_address(new_p4_phys);
+        Cr3::write(new_frame, flags);
+    }
+    
+    let phys_mem_offset = x86_64::VirtAddr::new(0);
+    let mut mapper = unsafe { crate::memory::paging::init_paging(phys_mem_offset) };
+
     let image_size = (load_end - load_base) as u64;
-    if !crate::memory::paging::allocate_user_memory(x86_64::VirtAddr::new(load_base), image_size) {
+    if !crate::memory::paging::allocate_process_memory(&mut mapper, x86_64::VirtAddr::new(load_base), image_size) {
+        unsafe { Cr3::write(old_p4, flags); }
         return Err(ExecError::MemoryError);
     }
+    mapped_allocations.push((load_base, image_size));
 
-    // 6. Allocate pages for the User Stack
-    if !crate::memory::paging::allocate_user_memory(x86_64::VirtAddr::new(user_stack_base), USER_STACK_SIZE as u64) {
+    if !crate::memory::paging::allocate_process_memory(&mut mapper, x86_64::VirtAddr::new(user_stack_base), USER_STACK_SIZE as u64) {
+        unsafe { Cr3::write(old_p4, flags); }
         return Err(ExecError::MemoryError);
     }
+    mapped_allocations.push((user_stack_base, USER_STACK_SIZE as u64));
 
-    // 7. Copy file data directly into the allocated memory
     for i in 0..ehdr.e_phnum as usize {
         let off = ehdr.e_phoff as usize + i * ehdr.e_phentsize as usize;
         let phdr = Elf64Phdr::parse(&file_data[off..])?;
@@ -191,50 +240,27 @@ pub fn load(path: &str) -> Result<u64, ExecError> {
 
         if file_offset + file_size <= file_data.len() {
             unsafe {
-                core::ptr::copy_nonoverlapping(
-                    file_data[file_offset..].as_ptr(),
-                    dest_ptr,
-                    file_size,
-                );
+                core::ptr::copy_nonoverlapping(file_data[file_offset..].as_ptr(), dest_ptr, file_size);
             }
         }
 
-        // BSS zeroing
         if phdr.p_memsz > phdr.p_filesz {
             let bss_size = (phdr.p_memsz - phdr.p_filesz) as usize;
-            unsafe {
-                core::ptr::write_bytes(dest_ptr.add(file_size), 0, bss_size);
-            }
+            unsafe { core::ptr::write_bytes(dest_ptr.add(file_size), 0, bss_size); }
         }
     }
 
+    unsafe { Cr3::write(old_p4, flags); }
+
     let real_entry = ehdr.e_entry;
+    crate::log_info!("ELF Parsed: mapped at {:#x}, entry={:#x} stack_top={:#x} (Isolated P4 at {:#x})", load_base, real_entry, user_stack_top, new_p4_phys.as_u64());
 
-    crate::log_info!("ELF: mapped at {:#x}, entry={:#x} stack_top={:#x}", load_base, real_entry, user_stack_top);
-
-    // 7. Set pending task info for trampoline
-    {
-        let mut pending = PENDING_USER_TASK.lock();
-        *pending = Some(UserTaskInfo {
-            entry: real_entry,
-            user_stack_top,
-        });
-    }
-
-    // 8. Spawn kernel task that will trampoline to Ring 3
-    let task_name = extract_filename(path);
-    let task_id = {
-        let mut sched = crate::scheduler::SCHEDULER.lock();
-        let id = sched.spawn_raw(
-            usermode_trampoline as *const () as u64,
-            &task_name,
-            alloc::vec::Vec::new(), // memory is dynamically mapped now
-        );
-        id
-    };
-
-    crate::log_info!("ELF: spawned task '{}' (id {})", task_name, task_id.0);
-    Ok(task_id.0)
+    Ok(ElfExecParams {
+        page_table: new_p4_phys.as_u64(),
+        entry: real_entry,
+        user_stack_top,
+        allocations: mapped_allocations,
+    })
 }
 
 fn read_file_all(path: &str) -> Result<Vec<u8>, ExecError> {

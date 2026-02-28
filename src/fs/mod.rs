@@ -4,6 +4,8 @@ pub mod file;
 pub mod dentry;
 pub mod mount;
 pub mod error;
+pub mod pipe;
+pub mod fd;
 pub mod ramfs;
 pub mod fat32;
 

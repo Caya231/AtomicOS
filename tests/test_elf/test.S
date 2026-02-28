@@ -14,6 +14,7 @@ _start:
 
     ; syscall: sys_exit(0)
     mov rax, 0          ; SYS_EXIT
+    mov rdi, 0          ; exit code = 0
     int 0x80
 
     ; Should never reach here

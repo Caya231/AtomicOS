@@ -35,7 +35,7 @@ fn task_counter() {
         crate::scheduler::yield_now();
     }
     crate::println!("[counter] done!");
-    crate::scheduler::exit_current();
+    crate::scheduler::exit_current(0);
 }
 
 /// Demo task: prints 3 ticks then exits.
@@ -46,11 +46,11 @@ fn task_ticker() {
         crate::scheduler::yield_now();
     }
     crate::println!("[ticker] finished.");
-    crate::scheduler::exit_current();
+    crate::scheduler::exit_current(0);
 }
 
 /// Demo task: prints hello and exits immediately.
 fn task_hello() {
     crate::println!("[hello] Hello from a background task!");
-    crate::scheduler::exit_current();
+    crate::scheduler::exit_current(0);
 }

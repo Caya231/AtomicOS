@@ -19,13 +19,13 @@ lazy_static! {
 
         // IST[0] = double-fault handler stack
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
-            let stack_start = VirtAddr::from_ptr(unsafe { &raw const DF_STACK });
+            let stack_start = VirtAddr::from_ptr(&raw const DF_STACK);
             stack_start + DF_STACK_SIZE as u64
         };
 
         // RSP0 = kernel stack for Ring 3 → Ring 0 transitions
         tss.privilege_stack_table[0] = {
-            let stack_start = VirtAddr::from_ptr(unsafe { &raw const KERNEL_STACK });
+            let stack_start = VirtAddr::from_ptr(&raw const KERNEL_STACK);
             stack_start + KERNEL_STACK_SIZE as u64
         };
 

@@ -1,4 +1,4 @@
-use core::arch::{asm, naked_asm};
+use core::arch::naked_asm;
 
 /// CPU register context saved/restored during context switches.
 /// All callee-saved registers on x86_64 System V ABI.

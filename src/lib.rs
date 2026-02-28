@@ -1,7 +1,6 @@
 #![no_std]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
-#![feature(naked_functions)]
 
 pub mod vga;
 pub mod serial;
@@ -36,7 +35,12 @@ pub extern "C" fn _start(multiboot_info_addr: usize) -> ! {
     fs::mount_fat32(); // ATA is now available
     println!("AtomicOS is successfully running!");
 
-    x86_64::instructions::interrupts::enable();
+
+
+    // Auto-test File Descriptor logic!
+    if let Err(e) = crate::loader::elf::load("/disk/pipe.elf") {
+        crate::log_error!("Failed to auto-test pipe.elf: {:?}", e);
+    }
 
     // Transfer control to TTY Event Loop
     crate::drivers::tty::process_input_loop();
