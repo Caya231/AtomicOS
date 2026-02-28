@@ -1,88 +1,76 @@
-# AtomicOS - Comprehensive Knowledge Transfer Document
+# AtomicOS - The Complete Knowledge Base & Engineering History
 
-This document contains everything implemented, designed, and debugged during our session building AtomicOS. You can paste this to another AI to give it complete context of the project's current state.
+Este documento é a "Torre de Babel" do AtomicOS. Foi projetado para ser copiado e colado para uma IA assumir o projeto exatamente de onde paramos, contendo detalhes granulares sobre a arquitetura do SO, as decisões de design, as abstrações construídas e os bugs vencidos em cada fase.
 
-## 1. Project Overview & Architecture
-AtomicOS is a custom x86_64 operating system built from scratch in Rust. It runs in Long Mode (64-bit) and uses Multiboot2 for booting via GRUB.
-- **Build System:** `make iso`, which compiles the Rust kernel using a custom JSON target (`target.json`), assembles boot code (`nasm`), links via `linker.ld`, and generates an ISO using `grub-mkrescue` and `xorriso`.
-- **Execution:** Runs in QEMU (`qemu-system-x86_64 -drive format=raw,file=build/disk.img,if=ide,index=0 -cdrom build/atomic_os.iso -boot d`).
-- **Disk Image:** We use a raw `disk.img` formatted with FAT32 to store loadable ELF binaries.
+---
 
-## 2. Core Kernel Subsystems Implemented
+## 1. Visão Geral e Arquitetura do Sistema
+O **AtomicOS** é um sistema operacional completo, *from scratch*, desenvolvido em **Rust `no_std`** para a arquitetura x86_64, executando em Long Mode. 
 
-### Memory Management (src/memory/)
-- **Physical Mmap:** Parses Multiboot2 memory map to find available RAM.
-- **Frame Allocator:** A Bump Allocator for physical frames (`BootInfoFrameAllocator`).
-- **Paging (Virtual Memory):** Full 4-level page tables (P4, P3, P2, P1). Implemented dynamic mapping of virtual memory to physical frames.
-- **Heap Allocator:** A custom linked-list/bump allocator (`#[global_allocator]`) to allow `alloc::vec`, `String`, `Box`, etc.
-- **Process Memory Isolation:** `alloc_user_memory` maps Ring 3 accessible memory (`PageTableFlags::USER_ACCESSIBLE`).
+- **Target JSON:** Compilamos usando um alvo customizado (`target.json`) nativo para bare-metal (`x86_64-unknown-none`).
+- **Bootloader:** Usamos **Multiboot2** e o GRUB. O Assembly (`boot.asm`, `multiboot_header.asm`, `long_mode_init.asm`) inicializa as Page Tables mais baixas (Identity Mapping temporário do Kernel), entra no modo 64-bits, chama o Rust (`_start`) passando o ponteiro da BIOS para o mapa de memória.
+- **Build Ecosystem:** `Makefile`, `nasm`, `x86_64-elf-gcc`, `ld`, `grub-mkrescue` e `xorriso`. O SO é agrupado numa ISO com um filesystem root de boot e uma imagem de disco Raw (`disk.img`) acoplada no QEMU via porta IDE IDE0.
+- **QEMU Boot Command:** `qemu-system-x86_64 -drive format=raw,file=build/disk.img,if=ide,index=0 -cdrom build/atomic_os.iso -boot d`.
 
-### Interrupts & GDT (src/interrupts/)
-- **GDT (Global Descriptor Table):** Defines Ring 0 (Kernel) and Ring 3 (User) Code/Data segments. Sets up `TaskStateSegment` (TSS) for privilege level transitions (RSP0).
-- **IDT (Interrupt Descriptor Table):** 
-  - Handles Exceptions: Double Fault (with dedicated IST stack), Page Fault, General Protection Fault.
-  - Handles Hardware IRQs (PIC 8259): Timer (IRQ0), Keyboard (IRQ1), Mouse (IRQ12).
-  - Handles Syscalls: `int 0x80` registered with DPL=3 to allow User Mode invocation.
+---
 
-### Drivers (src/drivers/)
-- **VGA Text Buffer:** Thread-safe `print!` and `println!` macros.
-- **Serial Port:** Outputs kernel debug logs (`log_info!`, `log_error!`) to host stdout via QEMU (critical for headless debugging).
-- **PS/2 Keyboard:** Polls scancodes, converts to characters. Includes a thread-safe `KeyboardBuffer` using Atomics.
-- **PS/2 Mouse:** Initializes mouse, enables packet streaming, tracks X/Y/Buttons.
-- **ATA PIO Disk:** Driver to read/write 512-byte sectors from the primary master IDE drive.
+## 2. O Histórico de Desenvolvimento (As Fases)
 
-### Virtual File System (VFS) & FAT32 (src/fs/)
-- **VFS Abstraction:** Mount points, generic `FileSystem` trait (`read_dir`, `open`, `read`, `write`).
-- **RamFS / TmpFS:** In-memory filesystems mounted at `/` and `/tmp`.
-- **FAT32:** Full read/write implementation parsing Boot Sector (BPB), traversing the File Allocation Table (FAT), managing clusters, reading directory entries (8.3 format), and loading file contents. Mounted at `/disk`.
+O projeto foi iterativamente dividido em "Fases" arquiteturais, garantindo que pilhas de dependência fossem escaladas de hardware básico para user-space completo:
 
-## 3. User Space & Multitasking (Phase 5.x)
+### Fase 1: Fundação Bare-Metal (Boot, VGA & Serial)
+Inicializamos a base absoluta do Rust.
+- **Booting & Long Mode:** Escrito em Assembly puro para inicializar a GDT provisória e Page Tables do bootstrap, ativando SSE/AVX.
+- **VGA Text Buffer (`src/vga.rs`):** Interação direta com o endereço MMIO `0xB8000` na placa de vídeo para dar vida ao `print!` e `println!`, envolvendo a tela de cor (Ex: texto amarelo padrão/azul escuro/vermelho em erros) usando locks (`spin::Mutex`).
+- **Portas Seriais (`src/serial.rs`):** Implementada a UART na porta COM1 (`0x3F8`) para debug headless. Macros `log_info!` e `log_error!` foram criadas exclusivamente enviadas à serial do host QEMU, limpando o VGA de bagunça.
 
-### ELF Loader (src/loader/elf.rs)
-- Parses 64-bit ELF headers and Program Headers.
-- Allocates a new physical Page Table (P4) for the process.
-- Maps the ELF `.text`, `.data`, and `.bss` sections into the process's isolated virtual address space (usually `0x80000000`).
-- Allocates a User Stack (e.g., at `0x7FFF0000`).
-- Transitions to Ring 3 via an `iretq` trampoline.
+### Fase 2: Hardware e Interrupções (IDT, GDT e PICS)
+Conectamos a CPU aos eventos externos do chip.
+- **Interrupt Descriptor Table (IDT):** Vetores completos de Double Fault, Page Fault, General Protection Fault.
+- **Global Descriptor Table (GDT) e TSS:** Configuração da TSS para empilhar interrupções adequadamente e permitir a troca futura `Ring 3 -> Ring 0` empurrando contextos para um vetor de pilha isolado no modo Kernel (`RSP0`).
+- **Programmable Interrupt Controller (PIC 8259):** Remapeado para offset 32/40.
+- **Timer (IRQ0):** O coração do OS. Cada "tick" (1.19MHz via PIT channel 0) serve para preempção.
+- **Keyboard (IRQ1) e Mouse (IRQ12):** Drivers rodando via I/O Port `0x60`, convertendo Scancodes PS/2 em `KeyCode`. O teclado possui um Circular Buffer seguro com `AtomicUsize` para interações I/O.
 
-### Cooperative & Preemptive Scheduler (src/scheduler/)
-- **Task/Process Struct:** Contains `pid`, `name`, `state` (Running, Ready, Blocked, Zombie), `context` (saved registers), `page_table` (CR3), `user_allocations`, `parent_pid`, `children`, and `fd_table`.
-- **Preemption:** The Timer Interrupt (IRQ0) calls `try_yield_now()`, enabling round-robin preemptive multitasking.
-- **Context Switching:** Assembly written (`switch_context`) that pushes callee-saved registers, swaps `rsp`, loads the new `CR3`, and pops the new contexts.
-- **Deadlock Fix:** We explicitly call `sti` (`interrupts::enable_and_hlt()`) in the idle thread (PID 0) to ensure CPU doesn't freeze when no user tasks are running.
+### Fase 3: Gerenciamento de Memória (Paging, Physical & Heap)
+Fizemos a ponte vital entre hardware e alocações de vida real (Vecs, Boxes, Strings).
+- **Physical Memory Map:** O OS varre o ponteiro do Multiboot v2 até achar memórias "Disponíveis".
+- **Frame Allocator (Bump Allocator):** Uma estrutura inicial rastreando blocos limpos de memória de 4KB para alocações cruas físicas.
+- **Virtual Paging (x86_64 P4, P3, P2, P1):** O Kernel usa mapeamento recursivo de nível 4 para rastrear Endereços Virtuais dentro das CR3 registers.
+- **Global Allocator:** O trait de alocação padrão no Rust foi ligado a um Linked-List allocator operando numa janela fixa da memória virtual, permitindo uso do namespace `alloc::`. (Implementamos um workaround com `#![feature(alloc_error_handler)]`).
 
-### File Descriptors & Pipes (Phase 5.4)
-- **FD Table:** Each process has an array of 64 `Option<Arc<Mutex<File>>>`.
-- **Standard I/O:** FDs 0 (STDIN), 1 (STDOUT), 2 (STDERR) connected to the `Console` (Keyboard/VGA).
-- **Anonymous Pipes (`sys_pipe`):** IPC mechanism with a 4096-byte Ring Buffer.
-  - **Blocking I/O:** If a process reads an empty pipe, the scheduler changes its state to `Blocked` and context-switches. It is woken up (`wake_all_blocked`) when a writer pushes data.
+### Fase 4: Kernel Multitasking Cooperativo/Preemptivo e VFS
+Nascimento dos processos.
+- **VFS (Virtual File System) & FAT32:** O Driver `ATA PIO` lê LBA do disco secundário. Escrevemos abstrações de nós (`FileSystem`), criamos um "tmpfs" na memória para o `/tmp`, e um driver completo **FAT32** para montar a partição Raw `disk.img` no `/disk`, permitindo localizar, iterar diretórios, ler clusters, resolver Fragmentação na FAT e carregar bytes de arquivos 8.3.
+- **Scheduler (Escalonador):** O controlador round-robin do sistema. Possui as filas `ready_queue` e o conceito de `Process`. Salto atômico (Context Switches em Naked Assembly Assembly com `r15`...`r8` saved states). Intercalado cooperativamente via `yield_now` e preemptivamente via timer hook `try_yield_now`.
 
-### Syscalls (`int 0x80` in src/syscalls/mod.rs)
-Fully implemented System V ABI compatible (via `pub extern "C" fn dispatch()`) syscalls:
-- `SYS_EXIT (0)`: Terminates process, turns to Zombie, frees memory.
-- `SYS_WRITE (1)`: Writes to FD (Console, File, Pipe).
-- `SYS_YIELD (2)`: Explicitly yields CPU.
-- `SYS_GETPID (3)`: Returns current PID.
-- `SYS_FORK (4)`: Deep-copies the entire Process Memory (P4 table mappings + physical frames), copies FD table (incrementing Arc counts), creates a new Kernel Stack, and branches execution.
-- `SYS_EXEC (5)`: Replaces current process image with a new ELF from disk.
-- `SYS_WAIT (6)`: Reaps Zombie children. Blocks until child exits.
-- `SYS_OPEN (7)`, `SYS_CLOSE (8)`, `SYS_READ (9)`, `SYS_DUP (10)`, `SYS_DUP2 (11)`, `SYS_PIPE (12)`.
+### Fase 5: Ring 3 User-Space, ELF e System Calls (O Salto Master)
+O trecho de engenharia bruta. Abstrair do escopo superprivilegiado.
+- **O ELF Loader:** Um loader em Rust (`loader/elf.rs`) rasga os binários estáticos compilados em Unix, cria uma tabela (CR3 P4 Table) independente isolando processos, varre os headers e joga código do ELF nos endereços virtuais (como `0x80000000`).
+- **Transição ao Ring 3:** Injetamos Segment Selectors (`USER_DATA_SEL` no SS e `USER_CODE_SEL` no CS), o stack virtual no RSP, e pulamos a ponte via um `iretq` assembly engenhoso, derrubando o limite de kernel-privilege.
+- **O Syscall Dispatcher (`int 0x80`):** Toda I/O (Print, Leitura de Disco, Yield CPU) de um processo isolado tem de pedir permissão ao OS. O Ring 3 joga código em RAX, RDI, RSI etc., ativa a trap do software IDT `0x80`, o Kernel escuta e atende funções preestabelecidas.
 
-## 4. Shell & Tools (src/shell/)
-- **TTY Loop:** PID 0 (Kernel Idle Task) runs `process_input_loop()` gathering keyboard input and evaluating commands.
-- **Commands implemented:** 
-  - `ls`, `cd`, `pwd`, `cat`, `echo`, `mkdir`, `touch`, `rm`.
-  - `ps` (lists process states), `kill` (terminates process).
-  - `spawn <elf>` (runs ELF in background), `exec <elf>` (runs ELF in foreground, blocking shell until exit).
-  - `clear`, `uptime`.
-  - `atatest` and `vfstest` (kernel diagnostic tests).
+### Fase 5.4: File Descriptors, IPC Pipes e `Fork` Profundo (Última Fase)
+A evolução do SO para suportar uma hierarquia Unix.
+- **Tabela de Arquivos & Threads Seguras:** Cada processo agora rastreia 64 ponteiros de referências atômicas Seguras `Arc<Mutex<File>>`.
+- **`SYS_FORK`:** Clona completamente um processo-pai. Implica **Deep Copy** completo da Tabela de Páginas da CR3 virtual e frames físicos, clonagem das stacks de kernel e tabelas de FDs (Herdando as instâncias via incremento de RC ARC!).
+- **Pipes e Comunicação IPC:** Mecanismo Anonymous Pipes `[read_end, write_end]`. Uma estrutura multi-thread avançada (`PipeInner`) com um Ring Buffer de 4096 bytes bloqueante!
+- **Bloqueio do Scheduler nas Threads IPC:** Se um leitor de pipe puxa vazio, seu State Process é atirado para `ProcessState::Blocked` e uma preempção força ele a dormir até o ESCRITOR mandar dados, onde o kernel emite `wake_all_blocked()` e rastreia o leitor adormecido de volta à corrida CPU.
+- **`SYS_EXEC`, `SYS_WAIT`, `SYS_EXIT`:** O gerenciamento do lifecycle. Filhos viram Zombies para os pais fazerem o reap.
+- **O Bug Resolvido:** Tivemos Deadlocks eternos onde a thread primária "0" do SO entrava em Sleep State do Timer sem ter permissões para escutar Interrupções (`IF=0`). O conserto exigiu gerenciar transições `hlt` atreladas firmemente com `sti` (`enable_and_hlt`).
 
-## 5. Testing & State of the OS
-- All Phase 5.4 features are currently **STABLE**.
-- Extensive tests were written in Assembly (`test_pipe.S`, `test_fork.S`) and compiled to ELF binaries (`pipe.elf`, `fd.elf`).
-- The `pipe.elf` test creates a pipe, forks, parent writes to pipe and waits, child reads from pipe and echoes to stdout, then both exit cleanly.
-- The build is completely clean (zero Rust compiler warnings). 
-- To build the test C/Assembly files inside `tests/test_elf/`, you rely on `x86_64-elf-gcc` and `nasm` using the custom `linker.ld` ensuring the `.text` section starts at `0x80000000`.
+---
 
-## Next Steps / What AI Should Know
-If you are continuing this project, the VFS abstraction is very basic. Most I/O directly assumes FAT32 or Pipe instances via Enums instead of dynamic trait objects. The next logical expansion would be adding a VFS Inode cache or migrating to dynamic Vnode traits (Phase 6), or expanding User-space libraries (libc porting).
+## 3. O Estado Atual e os Códigos Testados
+Neste momento presente, o AtomicOS domina completamente a estrutura de syscalls. 
+- O arquivo que roda localmente é o `pipe.elf` (O seu ASM é `test_pipe.S` na pasta de testes). Ele consegue gerar pipes virtuais, `forkar` si próprio em um clone binário, escrever dentro de um pipe e fazer com que o filho leia as informações simultâneas assíncronas repassando a string na tela no User Space Real!!
+- Quando `pipe.elf` encerra sem erros, o shell customizado retoma o fôlego via Teclado com Prompt vivo. O Scheduler opera sem vazar memória, colhendo o Zumbi e matando contextos de FD abertos sem DeadLock.
+
+## 4. Onde a Próxima IA Deve Continuar (Possíveis Caminhos Fase 6+)
+O SO é estável. A fundação de processos é robusta. Possíveis caminhos imediatos:
+1. **The VFS Overhaul (O Cache Inodes):** Nosso "VFS" hoje apenas converte paths duros ou ponteiros FAT32 ou ponteiros Pipe em Syscalls, ele não é dinâmico. Uma atualização para `Vnode` ou um layer real de sub-pontos de montagem (Mounting Hierarchy).
+2. **Signals (O Ctrl+C):** Fazer a fundação IPC unix onde a CPU salta handlers no user-space simulando `SIGINT`, `SIGKILL`.
+3. **C Standard Library (Libc):** Portar primitivas `newlib` do ecossistema C para que não tenhamos que escrever `int 0x80` explícito de Assembly, e possamos só usar `printf()`, `malloc()` normais rodando no Kernel C do AtomicOS.
+4. **Executáveis Interativos em Ring3:** Compilar editores de texto raw ou Shell scripts para embutir na imagem ISO.
+
+*(Ass.: Agente Antigravity, O Engenheiro Rust Master Original, para as gerações futuras.)*
