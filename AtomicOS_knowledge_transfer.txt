@@ -1,0 +1,88 @@
+# AtomicOS - Comprehensive Knowledge Transfer Document
+
+This document contains everything implemented, designed, and debugged during our session building AtomicOS. You can paste this to another AI to give it complete context of the project's current state.
+
+## 1. Project Overview & Architecture
+AtomicOS is a custom x86_64 operating system built from scratch in Rust. It runs in Long Mode (64-bit) and uses Multiboot2 for booting via GRUB.
+- **Build System:** `make iso`, which compiles the Rust kernel using a custom JSON target (`target.json`), assembles boot code (`nasm`), links via `linker.ld`, and generates an ISO using `grub-mkrescue` and `xorriso`.
+- **Execution:** Runs in QEMU (`qemu-system-x86_64 -drive format=raw,file=build/disk.img,if=ide,index=0 -cdrom build/atomic_os.iso -boot d`).
+- **Disk Image:** We use a raw `disk.img` formatted with FAT32 to store loadable ELF binaries.
+
+## 2. Core Kernel Subsystems Implemented
+
+### Memory Management (src/memory/)
+- **Physical Mmap:** Parses Multiboot2 memory map to find available RAM.
+- **Frame Allocator:** A Bump Allocator for physical frames (`BootInfoFrameAllocator`).
+- **Paging (Virtual Memory):** Full 4-level page tables (P4, P3, P2, P1). Implemented dynamic mapping of virtual memory to physical frames.
+- **Heap Allocator:** A custom linked-list/bump allocator (`#[global_allocator]`) to allow `alloc::vec`, `String`, `Box`, etc.
+- **Process Memory Isolation:** `alloc_user_memory` maps Ring 3 accessible memory (`PageTableFlags::USER_ACCESSIBLE`).
+
+### Interrupts & GDT (src/interrupts/)
+- **GDT (Global Descriptor Table):** Defines Ring 0 (Kernel) and Ring 3 (User) Code/Data segments. Sets up `TaskStateSegment` (TSS) for privilege level transitions (RSP0).
+- **IDT (Interrupt Descriptor Table):** 
+  - Handles Exceptions: Double Fault (with dedicated IST stack), Page Fault, General Protection Fault.
+  - Handles Hardware IRQs (PIC 8259): Timer (IRQ0), Keyboard (IRQ1), Mouse (IRQ12).
+  - Handles Syscalls: `int 0x80` registered with DPL=3 to allow User Mode invocation.
+
+### Drivers (src/drivers/)
+- **VGA Text Buffer:** Thread-safe `print!` and `println!` macros.
+- **Serial Port:** Outputs kernel debug logs (`log_info!`, `log_error!`) to host stdout via QEMU (critical for headless debugging).
+- **PS/2 Keyboard:** Polls scancodes, converts to characters. Includes a thread-safe `KeyboardBuffer` using Atomics.
+- **PS/2 Mouse:** Initializes mouse, enables packet streaming, tracks X/Y/Buttons.
+- **ATA PIO Disk:** Driver to read/write 512-byte sectors from the primary master IDE drive.
+
+### Virtual File System (VFS) & FAT32 (src/fs/)
+- **VFS Abstraction:** Mount points, generic `FileSystem` trait (`read_dir`, `open`, `read`, `write`).
+- **RamFS / TmpFS:** In-memory filesystems mounted at `/` and `/tmp`.
+- **FAT32:** Full read/write implementation parsing Boot Sector (BPB), traversing the File Allocation Table (FAT), managing clusters, reading directory entries (8.3 format), and loading file contents. Mounted at `/disk`.
+
+## 3. User Space & Multitasking (Phase 5.x)
+
+### ELF Loader (src/loader/elf.rs)
+- Parses 64-bit ELF headers and Program Headers.
+- Allocates a new physical Page Table (P4) for the process.
+- Maps the ELF `.text`, `.data`, and `.bss` sections into the process's isolated virtual address space (usually `0x80000000`).
+- Allocates a User Stack (e.g., at `0x7FFF0000`).
+- Transitions to Ring 3 via an `iretq` trampoline.
+
+### Cooperative & Preemptive Scheduler (src/scheduler/)
+- **Task/Process Struct:** Contains `pid`, `name`, `state` (Running, Ready, Blocked, Zombie), `context` (saved registers), `page_table` (CR3), `user_allocations`, `parent_pid`, `children`, and `fd_table`.
+- **Preemption:** The Timer Interrupt (IRQ0) calls `try_yield_now()`, enabling round-robin preemptive multitasking.
+- **Context Switching:** Assembly written (`switch_context`) that pushes callee-saved registers, swaps `rsp`, loads the new `CR3`, and pops the new contexts.
+- **Deadlock Fix:** We explicitly call `sti` (`interrupts::enable_and_hlt()`) in the idle thread (PID 0) to ensure CPU doesn't freeze when no user tasks are running.
+
+### File Descriptors & Pipes (Phase 5.4)
+- **FD Table:** Each process has an array of 64 `Option<Arc<Mutex<File>>>`.
+- **Standard I/O:** FDs 0 (STDIN), 1 (STDOUT), 2 (STDERR) connected to the `Console` (Keyboard/VGA).
+- **Anonymous Pipes (`sys_pipe`):** IPC mechanism with a 4096-byte Ring Buffer.
+  - **Blocking I/O:** If a process reads an empty pipe, the scheduler changes its state to `Blocked` and context-switches. It is woken up (`wake_all_blocked`) when a writer pushes data.
+
+### Syscalls (`int 0x80` in src/syscalls/mod.rs)
+Fully implemented System V ABI compatible (via `pub extern "C" fn dispatch()`) syscalls:
+- `SYS_EXIT (0)`: Terminates process, turns to Zombie, frees memory.
+- `SYS_WRITE (1)`: Writes to FD (Console, File, Pipe).
+- `SYS_YIELD (2)`: Explicitly yields CPU.
+- `SYS_GETPID (3)`: Returns current PID.
+- `SYS_FORK (4)`: Deep-copies the entire Process Memory (P4 table mappings + physical frames), copies FD table (incrementing Arc counts), creates a new Kernel Stack, and branches execution.
+- `SYS_EXEC (5)`: Replaces current process image with a new ELF from disk.
+- `SYS_WAIT (6)`: Reaps Zombie children. Blocks until child exits.
+- `SYS_OPEN (7)`, `SYS_CLOSE (8)`, `SYS_READ (9)`, `SYS_DUP (10)`, `SYS_DUP2 (11)`, `SYS_PIPE (12)`.
+
+## 4. Shell & Tools (src/shell/)
+- **TTY Loop:** PID 0 (Kernel Idle Task) runs `process_input_loop()` gathering keyboard input and evaluating commands.
+- **Commands implemented:** 
+  - `ls`, `cd`, `pwd`, `cat`, `echo`, `mkdir`, `touch`, `rm`.
+  - `ps` (lists process states), `kill` (terminates process).
+  - `spawn <elf>` (runs ELF in background), `exec <elf>` (runs ELF in foreground, blocking shell until exit).
+  - `clear`, `uptime`.
+  - `atatest` and `vfstest` (kernel diagnostic tests).
+
+## 5. Testing & State of the OS
+- All Phase 5.4 features are currently **STABLE**.
+- Extensive tests were written in Assembly (`test_pipe.S`, `test_fork.S`) and compiled to ELF binaries (`pipe.elf`, `fd.elf`).
+- The `pipe.elf` test creates a pipe, forks, parent writes to pipe and waits, child reads from pipe and echoes to stdout, then both exit cleanly.
+- The build is completely clean (zero Rust compiler warnings). 
+- To build the test C/Assembly files inside `tests/test_elf/`, you rely on `x86_64-elf-gcc` and `nasm` using the custom `linker.ld` ensuring the `.text` section starts at `0x80000000`.
+
+## Next Steps / What AI Should Know
+If you are continuing this project, the VFS abstraction is very basic. Most I/O directly assumes FAT32 or Pipe instances via Enums instead of dynamic trait objects. The next logical expansion would be adding a VFS Inode cache or migrating to dynamic Vnode traits (Phase 6), or expanding User-space libraries (libc porting).
