@@ -98,6 +98,6 @@ pub fn read_char() -> KeyCode {
             return key;
         }
         crate::scheduler::yield_now();
-        x86_64::instructions::hlt();
+        x86_64::instructions::interrupts::enable_and_hlt();
     }
 }

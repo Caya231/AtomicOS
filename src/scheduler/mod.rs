@@ -200,14 +200,23 @@ pub fn try_yield_now() {
         }
 
         if let Some(mut current) = sched.current.take() {
-            let mut next = loop {
+            let queue_len = sched.ready_queue.len();
+            let mut found = None;
+            for _ in 0..queue_len {
                 if let Some(n) = sched.ready_queue.pop_front() {
                     if n.state == ProcessState::Ready || n.state == ProcessState::Running {
-                        break n;
+                        found = Some(n);
+                        break;
                     } else {
                         sched.ready_queue.push_back(n);
                     }
-                } else {
+                }
+            }
+            let mut next = match found {
+                Some(n) => n,
+                None => {
+                    // No runnable task found, put current back and return
+                    sched.current = Some(current);
                     return;
                 }
             };
@@ -250,15 +259,23 @@ pub fn yield_now() {
         // Take the current process out
         if let Some(mut current) = sched.current.take() {
             // Get next process (skipping Blocked/Zombie)
-            let mut next = loop {
+            let queue_len = sched.ready_queue.len();
+            let mut found = None;
+            for _ in 0..queue_len {
                 if let Some(n) = sched.ready_queue.pop_front() {
                     if n.state == ProcessState::Ready || n.state == ProcessState::Running {
-                        break n;
+                        found = Some(n);
+                        break;
                     } else {
                         sched.ready_queue.push_back(n);
                     }
-                } else {
-                    // This should never fully empty if idle thread exists, but safeguard
+                }
+            }
+            let mut next = match found {
+                Some(n) => n,
+                None => {
+                    // No runnable task found, put current back and return
+                    sched.current = Some(current);
                     return;
                 }
             };
@@ -357,7 +374,7 @@ pub fn exit_current(exit_code: u64) {
                 // No tasks left at all (not even the shell).
                 // crate::log_info!("All tasks finished. System halted.");
                 drop(sched);
-                loop { x86_64::instructions::hlt(); }
+                loop { x86_64::instructions::interrupts::enable_and_hlt(); }
             }
         };
 
