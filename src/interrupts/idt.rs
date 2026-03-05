@@ -78,10 +78,25 @@ extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame, error_code: PageFaultErrorCode)
 {
     use x86_64::registers::control::Cr2;
-    log_error!("EXCEPTION: PAGE FAULT");
-    log_error!("Accessed Address: {:?}", Cr2::read());
-    log_error!("Error Code: {:?}", error_code);
-    panic!("EXCEPTION: PAGE FAULT\n{:#?}", stack_frame);
+    let accessed_address = Cr2::read();
+    
+    // Check if the page fault originated from User Mode (Ring 3)
+    if error_code.contains(PageFaultErrorCode::USER_MODE) {
+        crate::log_error!("SEGMENTATION FAULT in User Process!");
+        crate::log_error!("Accessed Address: {:?}", accessed_address);
+        crate::log_error!("Error Code: {:?}", error_code);
+        crate::log_error!("{:#?}", stack_frame);
+        
+        crate::println!("Segmentation Fault");
+        
+        // Kill the offending process gracefully instead of panicking the whole kernel
+        crate::scheduler::exit_current(139); // 139 is standard Unix code for segfault (128 + 11)
+    } else {
+        log_error!("KERNEL PANIC: PAGE FAULT");
+        log_error!("Accessed Address: {:?}", accessed_address);
+        log_error!("Error Code: {:?}", error_code);
+        panic!("EXCEPTION: PAGE FAULT\n{:#?}", stack_frame);
+    }
 }
 
 extern "x86-interrupt" fn timer_interrupt_handler(

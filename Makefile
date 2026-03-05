@@ -37,7 +37,7 @@ QEMU_ARGS := -drive format=raw,file=$(DISK_IMG),if=ide,index=0 -cdrom $(ISO_FILE
 QEMU_DBG  := $(QEMU_ARGS) -s -S -d int -no-reboot -no-shutdown
 
 # ============================================================================
-.PHONY: all bootloader kernel link iso run debug flat clean help
+.PHONY: all bootloader kernel userland link iso run debug flat clean help
 
 all: iso
 
@@ -63,6 +63,13 @@ kernel:
 	@echo "[RUST] Compiling kernel..."
 	cargo build $(CARGO_FLAGS) $(CARGO_TARGET)
 
+# --- Userland (Rust) ---
+userland:
+	@echo "[RUST] Compiling userland..."
+	cd userland/hello && cargo build --release
+	cd userland/fork_wait && cargo build --release
+	cd userland/pipe_test && cargo build --release
+
 # --- Link ---
 link: $(KERNEL_BIN)
 
@@ -85,9 +92,24 @@ iso: $(KERNEL_BIN)
 	grub-mkrescue -o $(ISO_FILE) build/isodir
 
 # --- Run in QEMU ---
-run: iso
+run: iso userland
 	@echo "[QEMU] Booting AtomicOS..."
 	@test -f $(DISK_IMG) || (echo "[DISK] Creating 16MB FAT32 disk image..." && dd if=/dev/zero of=$(DISK_IMG) bs=1M count=16 2>/dev/null && mkfs.fat -F 32 -n ATOMICOS $(DISK_IMG) >/dev/null)
+	@echo "[DISK] Copying userland programs to FAT32 image..."
+	@mkdir -p build/mnt
+	@sudo mount -t vfat $(DISK_IMG) build/mnt -o loop,uid=$$(id -u),gid=$$(id -g) || (guestmount -a $(DISK_IMG) -m /dev/sda build/mnt 2>/dev/null || true)
+	@if mountpoint -q build/mnt; then \
+		cp userland/hello/target/x86_64-unknown-none/release/hello build/mnt/hello.elf; \
+		cp userland/fork_wait/target/x86_64-unknown-none/release/fork_wait build/mnt/forkwait.elf; \
+		cp userland/pipe_test/target/x86_64-unknown-none/release/pipe_test build/mnt/pipe.elf; \
+		sudo umount build/mnt || guestunmount build/mnt; \
+	else \
+		echo "[DISK] Guestmount/Mount failed! Using mtools instead..."; \
+		mcopy -i $(DISK_IMG) -o userland/hello/target/x86_64-unknown-none/release/hello ::/hello.elf; \
+		mcopy -i $(DISK_IMG) -o userland/fork_wait/target/x86_64-unknown-none/release/fork_wait ::/fwait.elf; \
+		mcopy -i $(DISK_IMG) -o userland/pipe_test/target/x86_64-unknown-none/release/pipe_test ::/pipe.elf; \
+	fi
+	rm -rf build/mnt
 	$(QEMU) $(QEMU_ARGS)
 
 # --- Debug with GDB ---

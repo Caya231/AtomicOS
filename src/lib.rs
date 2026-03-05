@@ -38,8 +38,8 @@ pub extern "C" fn _start(multiboot_info_addr: usize) -> ! {
 
 
     // Auto-test File Descriptor logic!
-    if let Err(e) = crate::loader::elf::load("/disk/pipe.elf") {
-        crate::log_error!("Failed to auto-test pipe.elf: {:?}", e);
+    if let Err(e) = crate::loader::elf::load("/disk/hello.elf") {
+        crate::log_error!("Failed to auto-test hello.elf: {:?}", e);
     }
 
     // Transfer control to TTY Event Loop

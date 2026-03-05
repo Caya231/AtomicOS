@@ -64,6 +64,8 @@ impl Scheduler {
             page_table: current_p4_addr,
             _kernel_stack: stack,
             user_allocations: alloc::vec::Vec::new(),
+            heap_start: 0,
+            heap_end: 0,
             fd_table: create_default_fd_table(),
             _image: None,
         };
@@ -130,6 +132,8 @@ pub fn init() {
         page_table: current_p4_addr,
         _kernel_stack: Box::new([]),
         user_allocations: alloc::vec::Vec::new(),
+        heap_start: 0,
+        heap_end: 0,
         fd_table: create_default_fd_table(),
         _image: None,
     };
@@ -176,6 +180,8 @@ pub fn spawn_process(name: &str, page_table: u64, entry: u64, _user_stack_top: u
         page_table,
         _kernel_stack: kernel_stack,
         user_allocations: allocations,
+        heap_start: 0,  // Will be set during sys_exec
+        heap_end: 0,
         fd_table: create_default_fd_table(),
         _image: None,
     };
@@ -432,6 +438,8 @@ pub fn sys_fork() -> u64 {
     let mut sched = SCHEDULER.lock();
     
     // Extract everything we need from current to drop the borrow
+        let parent_heap_start = current_proc.heap_start;
+        let parent_heap_end = current_proc.heap_end;
     let (parent_pid, parent_name, child_allocations, parent_stack_ptr, parent_image, parent_fd_table) = {
         let current_proc = match sched.current.as_ref() {
             Some(p) => p,
@@ -503,6 +511,8 @@ pub fn sys_fork() -> u64 {
         page_table: child_p4_phys.as_u64(),
         _kernel_stack: child_kernel_stack,
         user_allocations: child_allocations,
+        heap_start: parent_heap_start,
+        heap_end: parent_heap_end,
         fd_table: parent_fd_table, // Exact clone()! Bumps Arc ref counts seamlessly!
         _image: parent_image,
     };
@@ -548,6 +558,8 @@ pub fn sys_exec(path: &str) -> Result<(), crate::loader::elf::ExecError> {
         current.page_table = params.page_table;
         current.user_allocations = params.allocations;
         current.name = owned_path;
+        current.heap_start = params.heap_start;
+        current.heap_end = params.heap_start; // Initially empty heap
         
         // 4. Reset the Kernel Stack to a clean slate over the current frame!
         // We reset `current.context.rsp` to the top of the kernel stack where a fresh
@@ -719,4 +731,49 @@ pub fn wake_all_blocked() {
     if let Some(mut sched) = SCHEDULER.try_lock() {
         sched.wake_all_blocked();
     }
+}
+
+/// Syscall brk: Sets the end of the data segment (heap).
+/// Returns the new program break, or the old one if it failed or if `addr` is 0.
+pub fn sys_brk(addr: u64) -> u64 {
+    let mut sched = SCHEDULER.lock();
+    let current = match sched.current.as_mut() {
+        Some(p) => p,
+        None => return 0,
+    };
+
+    if addr == 0 {
+        return current.heap_end; // Requesting current break
+    }
+
+    if addr < current.heap_start {
+        // Can't shrink below the start of the heap
+        return current.heap_end;
+    }
+
+    let p4_addr = current.page_table;
+    let old_end = current.heap_end;
+
+    // Check if we need to expand. We allocate in 4KB frames.
+    use x86_64::VirtAddr;
+    let old_end_aligned = (old_end + 4095) & !4095;
+    let new_end_aligned = (addr + 4095) & !4095;
+
+    if new_end_aligned > old_end_aligned {
+        // Need to allocate frames
+        let size_to_alloc = new_end_aligned - old_end_aligned;
+        // Allocate physical frames and map them.
+        let vaddr = VirtAddr::new(old_end_aligned);
+        if !crate::memory::paging::map_user_memory(x86_64::PhysAddr::new(p4_addr), vaddr, size_to_alloc) { // Requires kernel support mapping
+            crate::log_error!("sys_brk failed allocating {} bytes", size_to_alloc);
+            return old_end; // Out of memory
+        }
+        
+        current.user_allocations.push((old_end_aligned, size_to_alloc));
+    } else if new_end_aligned < old_end_aligned {
+        // Optional Phase 6: Shrink the heap by removing allocations (not implemented here for simplicity)
+    }
+
+    current.heap_end = addr;
+    addr
 }

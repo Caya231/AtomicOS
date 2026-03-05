@@ -36,6 +36,8 @@ pub struct Process {
     pub user_allocations: Vec<(u64, u64)>, // (VirtAddr_Start, Size)
 
     /// Process File Descriptor Table
+    pub heap_start: u64,
+    pub heap_end: u64,
     pub fd_table: Vec<Option<alloc::sync::Arc<spin::Mutex<crate::fs::fd::File>>>>,
 
     /// Optional program image memory (For legacy compatibility before full VFS elf parsing is moved to Page Mapping)

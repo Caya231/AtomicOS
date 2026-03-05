@@ -16,6 +16,7 @@ pub const SYS_READ:  u64 = 9;
 pub const SYS_DUP:   u64 = 10;
 pub const SYS_DUP2:  u64 = 11;
 pub const SYS_PIPE:  u64 = 12;
+pub const SYS_BRK:   u64 = 13;
 
 /// Central syscall dispatcher — called from the int 0x80 handler.
 /// Arguments come from registers: rax=number, rdi=arg0, rsi=arg1, rdx=arg2.
@@ -277,6 +278,10 @@ pub extern "C" fn dispatch(number: u64, arg0: u64, arg1: u64, arg2: u64) -> u64 
                 return new_fd as u64;
             }
             u64::MAX // Invalid old_fd
+        }
+        SYS_BRK => {
+            let addr = arg0;
+            scheduler::sys_brk(addr)
         }
         SYS_PIPE => {
             let fds_ptr = arg0 as *mut [u32; 2]; // Pass pointer to [u32; 2] from user
